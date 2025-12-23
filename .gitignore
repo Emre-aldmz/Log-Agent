@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Ortam dosyaları
+.env
+
+# Log ve rapor dosyaları (runtime)
+access.log
+tehdit_raporu.txt
+durum_raporu.txt
+analiz_raporu.txt
+
+# Editor / OS
+*.swp
+*.swo
+.DS_Store

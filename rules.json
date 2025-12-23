@@ -1,0 +1,119 @@
+[
+  {
+    "id": "SQLI_OR_1_EQ_1",
+    "category": "SQL Injection",
+    "severity": "high",
+    "confidence": "definite",
+    "pattern": "(?i)(\\bor\\s+1=1\\b|\\bor\\s+'1'='1')",
+    "description": "SQL tautology saldırı kalıbı (OR 1=1).",
+    "enabled": true
+  },
+  {
+    "id": "SQLI_UNION_SELECT",
+    "category": "SQL Injection",
+    "severity": "high",
+    "confidence": "definite",
+    "pattern": "(?i)union\\s+select",
+    "description": "UNION SELECT ile veri sızdırma girişimi.",
+    "enabled": true
+  },
+  {
+    "id": "SQLI_DROP_TABLE",
+    "category": "SQL Injection",
+    "severity": "critical",
+    "confidence": "definite",
+    "pattern": "(?i)drop\\s+table",
+    "description": "DROP TABLE komutu tespit edildi!",
+    "enabled": true
+  },
+  {
+    "id": "SQLI_INFO_SCHEMA",
+    "category": "SQL Injection",
+    "severity": "medium",
+    "confidence": "suspicious",
+    "pattern": "(?i)information_schema",
+    "description": "Veritabanı yapısı sorgulanıyor olabilir.",
+    "enabled": true
+  },
+  {
+    "id": "SQLI_TIME_BASED",
+    "category": "SQL Injection",
+    "severity": "medium",
+    "confidence": "suspicious",
+    "pattern": "(?i)benchmark\\(|sleep\\(",
+    "description": "Time-based SQLi (SLEEP, BENCHMARK) denemesi.",
+    "enabled": true
+  },
+  {
+    "id": "SQLI_SELECT_FROM",
+    "category": "SQL Injection",
+    "severity": "medium",
+    "confidence": "suspicious",
+    "pattern": "(?i)select.*from",
+    "description": "select ... from ifadesi şüpheli SQL kodu olabilir.",
+    "enabled": true
+  },
+  {
+    "id": "XSS_SCRIPT_TAG",
+    "category": "XSS",
+    "severity": "high",
+    "confidence": "definite",
+    "pattern": "(?i)<script>",
+    "description": "XSS denemesi: <script> etiketi tespit edildi.",
+    "enabled": true
+  },
+  {
+    "id": "XSS_EVENT_HANDLER",
+    "category": "XSS",
+    "severity": "medium",
+    "confidence": "suspicious",
+    "pattern": "(?i)onerror\\s*=|onload\\s*=",
+    "description": "Event handler ile XSS denemesi.",
+    "enabled": true
+  },
+  {
+    "id": "XSS_IFRAME",
+    "category": "XSS",
+    "severity": "medium",
+    "confidence": "suspicious",
+    "pattern": "(?i)<iframe",
+    "description": "Kötü amaçlı iframe olabilir.",
+    "enabled": true
+  },
+  {
+    "id": "PATH_TRAVERSAL",
+    "category": "Path Traversal",
+    "severity": "high",
+    "confidence": "definite",
+    "pattern": "(\\.\\./){2,}",
+    "description": "Dosya sistemi dışına çıkma denemesi (../).",
+    "enabled": true
+  },
+  {
+    "id": "SYSTEM_FILE_ACCESS",
+    "category": "Path Traversal",
+    "severity": "critical",
+    "confidence": "definite",
+    "pattern": "(?i)/etc/passwd|C:\\\\Windows\\\\System32",
+    "description": "Sistem dosyasına erişim denemesi!",
+    "enabled": true
+  },
+  {
+    "id": "LOGIN_BRUTE_FORCE",
+    "category": "Bruteforce",
+    "severity": "low",
+    "confidence": "suspicious",
+    "pattern": "(?i)/login|signin",
+    "description": "Çok sık /login denemesi brute force olabilir (ek mantık ile genişletilebilir).",
+    "enabled": true
+  },
+  {
+    "id": "CMD_PARAM_SUSPICIOUS",
+    "category": "Command Injection",
+    "severity": "medium",
+    "confidence": "suspicious",
+    "pattern": "(?i)([?&](cmd|exec|shell|run|command)=)",
+    "description": "URL içinde komut çalıştırma amaçlı parametre var (cmd=, exec= vb.).",
+    "enabled": true
+  }
+]
