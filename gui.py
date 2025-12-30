@@ -5,9 +5,8 @@ import threading
 import queue
 from pathlib import Path
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter.scrolledtext import ScrolledText
+import customtkinter as ctk
+from tkinter.scrolledtext import ScrolledText # Will be replaced by CTkTextbox
 
 # Dashboard için kütüphaneler
 try:
@@ -25,7 +24,7 @@ except ImportError as e:
     )
 
 class LogGozcusuGUI:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: ctk.CTk):
         self.root = root
         self.root.title("Log Gözcüsü - Ajan Arayüzü")
         self.root.geometry("900x600")
@@ -37,14 +36,11 @@ class LogGozcusuGUI:
         self.log_queue: "queue.Queue[str]" = queue.Queue()
 
         # E-posta adresi için bir değişken
-        self.email_to = tk.StringVar()
-        self.api_key_var = tk.StringVar()
+        self.email_to = ctk.StringVar()
+        self.api_key_var = ctk.StringVar()
 
         # Proje klasörü (ajan.py ile aynı dizin)
         self.base_dir = Path(__file__).resolve().parent
-
-        # Arayüz stilini ve renklerini ayarla
-        self._setup_style()
 
         # Ekranlar (frame) oluştur
         self._build_start_screen()
@@ -64,147 +60,97 @@ class LogGozcusuGUI:
     # Arayüz kurulum ve stil
     # -----------------------------
 
-    def _setup_style(self):
-        self.colors = {
-            "bg_dark": "#2E2E2E",
-            "bg_light": "#3C3C3C",
-            "fg_light": "#F0F0F0",
-            "accent_green": "#2ECC71",
-            "accent_red": "#E74C3C",
-        }
-
-        self.root.configure(bg=self.colors["bg_dark"])
-
-        style = ttk.Style()
-        # Butonlar hariç diğer widget'ları koyu tema yap
-        style.configure("TFrame", background=self.colors["bg_dark"])
-        style.configure(
-            "TLabel",
-            background=self.colors["bg_dark"],
-            foreground=self.colors["fg_light"],
-            font=("Segoe UI", 10)
-        )
-        style.configure(
-            "Title.TLabel",
-            font=("Segoe UI", 24, "bold"),
-        )
-        style.configure(
-            "Desc.TLabel",
-            font=("Segoe UI", 11),
-        )
-        # Entry widget'ı için stil
-        style.configure(
-            "TEntry",
-            fieldbackground=self.colors["bg_light"],
-            foreground=self.colors["fg_light"],
-            insertcolor=self.colors["fg_light"],
-            borderwidth=1,
-            relief="solid",
-        )
-
     def _build_start_screen(self):
-        self.start_frame = ttk.Frame(self.root, padding=40)
+        self.start_frame = ctk.CTkFrame(self.root)
+        self.start_frame.pack(fill="both", expand=True)
 
-        title = ttk.Label(
+
+        title = ctk.CTkLabel(
             self.start_frame,
             text="Log Gözcüsü",
-            style="Title.TLabel"
+            font=ctk.CTkFont(size=24, weight="bold")
         )
-        title.pack(pady=20)
+        title.pack(pady=40, padx=20)
 
-        desc = ttk.Label(
+        desc = ctk.CTkLabel(
             self.start_frame,
             text=(
                 "Web sunucusu access.log dosyasını izleyen, kural + AI destekli güvenlik ajanı.\n"
                 "Uyarıların gönderileceği e-posta adresini girin ve ajanı başlatın."
             ),
-            style="Desc.TLabel",
+            font=ctk.CTkFont(size=12),
             justify="center"
         )
-        desc.pack(pady=(10, 20))
+        desc.pack(pady=(10, 20), padx=20)
 
         # E-posta giriş alanı
-        email_frame = ttk.Frame(self.start_frame)
-        email_frame.pack(pady=10, fill='x', padx=50)
+        email_frame = ctk.CTkFrame(self.start_frame, fg_color="transparent")
+        email_frame.pack(pady=10, fill='x', padx=100)
 
-        email_label = ttk.Label(
+        email_label = ctk.CTkLabel(
             email_frame,
             text="Uyarı E-Postası:",
-            font=("Segoe UI", 10),
         )
         email_label.pack(side="left", padx=(0, 10))
 
-        email_entry = ttk.Entry(
+        email_entry = ctk.CTkEntry(
             email_frame,
             textvariable=self.email_to,
-            font=("Segoe UI", 10),
-            width=40
+            width=250
         )
         email_entry.pack(side="left", fill="x", expand=True)
 
-
-        # Orjinal, stilsiz buton
-        run_button = ttk.Button(
+        run_button = ctk.CTkButton(
             self.start_frame,
             text="Ajanı Çalıştır",
             command=self.start_from_start_screen,
         )
-        run_button.pack(pady=20, ipadx=10, ipady=5)
+        run_button.pack(pady=40, ipadx=10, ipady=5)
 
     def _build_main_screen(self):
-        self.main_frame = ttk.Frame(self.root, padding=10)
+        self.main_frame = ctk.CTkFrame(self.root, fg_color="transparent")
 
         # Üst bar (Durdur/Başlat butonları ve durum etiketi)
-        top_bar = ttk.Frame(self.main_frame)
-        top_bar.pack(side="top", fill="x", pady=(0, 5))
+        top_bar = ctk.CTkFrame(self.main_frame)
+        top_bar.pack(side="top", fill="x", pady=(10, 5), padx=10)
 
-        self.status_label = ttk.Label(
+        self.status_label = ctk.CTkLabel(
             top_bar,
             text="Durum: Beklemede",
-            font=("Segoe UI", 11, "bold")
+            font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.status_label.pack(side="left", padx=5, pady=5)
+        self.status_label.pack(side="left", padx=10, pady=5)
         self._update_status_label("Beklemede", "default")
 
-        button_frame = ttk.Frame(top_bar)
+        button_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
         button_frame.pack(side="right")
         
-        btn_api = ttk.Button(button_frame, text="API Ayarları", command=self._open_api_window)
+        btn_api = ctk.CTkButton(button_frame, text="API Ayarları", command=self._open_api_window, width=100)
         btn_api.pack(side="right", padx=(10, 0))
         
-        btn_stop = ttk.Button(button_frame, text="Durdur", command=self.stop_agent)
+        btn_stop = ctk.CTkButton(button_frame, text="Durdur", command=self.stop_agent, width=100)
         btn_stop.pack(side="right", padx=(5, 0))
 
-        btn_restart = ttk.Button(button_frame, text="Yeniden Başlat", command=self.restart_agent)
+        btn_restart = ctk.CTkButton(button_frame, text="Yeniden Başlat", command=self.restart_agent, width=100)
         btn_restart.pack(side="right", padx=5)
 
-        btn_start = ttk.Button(button_frame, text="Başlat", command=self.start_agent)
+        btn_start = ctk.CTkButton(button_frame, text="Başlat", command=self.start_agent, width=100)
         btn_start.pack(side="right", padx=5)
 
 
         # Sekmeli yapı (Notebook)
-        self.notebook = ttk.Notebook(self.main_frame)
-        self.notebook.pack(fill="both", expand=True, pady=5)
+        self.notebook = ctk.CTkTabview(self.main_frame)
+        self.notebook.pack(fill="both", expand=True, pady=5, padx=10)
 
-        # Dashboard Sekmesi
-        self.dashboard_frame = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.dashboard_frame, text="Dashboard")
-        
-        # Canlı Loglar Sekmesi
-        self.logs_frame = ttk.Frame(self.notebook, padding=5)
-        self.notebook.add(self.logs_frame, text="Canlı Loglar")
+        self.notebook.add("Dashboard")
+        self.notebook.add("Canlı Loglar")
 
         # Log metin alanını Canlı Loglar sekmesine taşı
-        self.log_text = ScrolledText(
-            self.logs_frame,
+        self.log_text = ctk.CTkTextbox(
+            self.notebook.tab("Canlı Loglar"),
             wrap="word",
-            font=("Consolas", 10),
+            font=("Consolas", 12),
             state="disabled",
-            background=self.colors["bg_dark"],
-            foreground=self.colors["fg_light"],
-            insertbackground=self.colors["fg_light"],
-            borderwidth=1,
-            relief="solid",
             padx=5,
             pady=5,
         )
@@ -214,13 +160,13 @@ class LogGozcusuGUI:
         self._build_dashboard_tab()
 
     def _open_api_window(self):
-        api_window = tk.Toplevel(self.root)
+        api_window = ctk.CTkToplevel(self.root)
         api_window.title("API Anahtarı Ayarları")
-        api_window.geometry("600x400")
-        api_window.configure(bg=self.colors["bg_dark"])
+        api_window.geometry("600x450")
+        api_window.transient(self.root) # Ana pencerenin üzerinde kal
         
-        main_frame = ttk.Frame(api_window, padding=20)
-        main_frame.pack(fill="both", expand=True)
+        main_frame = ctk.CTkFrame(api_window, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # Açıklama metni
         tr_text = (
@@ -230,7 +176,6 @@ class LogGozcusuGUI:
             "1. openrouter.ai adresine gidin ve kayıt olun.\n"
             "2. Hesabınıza giriş yaptıktan sonra 'Keys' (Anahtarlar) sayfasına gidin.\n"
             "3. Yeni bir anahtar oluşturun ve aşağıya yapıştırın.\n\n"
-            "Varsayılan Model: deepseek/deepseek-chat\n"
             "Not: Bu özellik isteğe bağlıdır. Anahtar girmezseniz, program sadece kural tabanlı çalışır."
         )
         
@@ -241,55 +186,55 @@ class LogGozcusuGUI:
             "1. Go to openrouter.ai and sign up.\n"
             "2. After logging into your account, navigate to the 'Keys' page.\n"
             "3. Create a new key and paste it below.\n\n"
-            "Default Model: deepseek/deepseek-chat\n"
             "Note: This feature is optional. If you don't enter a key, the program will run in rule-based only mode."
         )
 
         # Metinleri sekmeli yapıda göster
-        text_notebook = ttk.Notebook(main_frame)
-        text_notebook.pack(fill="x", pady=10, expand=True)
+        text_notebook = ctk.CTkTabview(main_frame)
+        text_notebook.pack(fill="both", pady=10, expand=True)
         
-        tr_frame = ttk.Frame(text_notebook)
-        en_frame = ttk.Frame(text_notebook)
-        text_notebook.add(tr_frame, text="Türkçe")
-        text_notebook.add(en_frame, text="English")
+        text_notebook.add("Türkçe")
+        text_notebook.add("English")
 
-        tr_label = ttk.Label(tr_frame, text=tr_text, wraplength=550, justify="left")
+        tr_label = ctk.CTkLabel(text_notebook.tab("Türkçe"), text=tr_text, wraplength=550, justify="left")
         tr_label.pack(padx=10, pady=10, fill="both", expand=True)
         
-        en_label = ttk.Label(en_frame, text=en_text, wraplength=550, justify="left")
+        en_label = ctk.CTkLabel(text_notebook.tab("English"), text=en_text, wraplength=550, justify="left")
         en_label.pack(padx=10, pady=10, fill="both", expand=True)
 
         # API Anahtarı giriş alanı
-        entry_frame = ttk.Frame(main_frame)
+        entry_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         entry_frame.pack(fill='x', pady=10)
         
-        api_label = ttk.Label(entry_frame, text="OpenRouter API Key:")
+        api_label = ctk.CTkLabel(entry_frame, text="OpenRouter API Key:")
         api_label.pack(side="left", padx=(0, 10))
         
-        api_entry = ttk.Entry(entry_frame, textvariable=self.api_key_var, width=50, show="*")
+        api_entry = ctk.CTkEntry(entry_frame, textvariable=self.api_key_var, width=50, show="*")
         api_entry.pack(side="left", fill="x", expand=True)
 
         # Butonlar
-        button_frame_popup = ttk.Frame(main_frame)
+        button_frame_popup = ctk.CTkFrame(main_frame, fg_color="transparent")
         button_frame_popup.pack(pady=10)
 
         def save_and_close():
             self._append_log("[INFO] API anahtarı kaydedildi. Değişikliklerin etkili olması için ajanı yeniden başlatın.\n")
             api_window.destroy()
 
-        save_button = ttk.Button(button_frame_popup, text="Kaydet ve Kapat", command=save_and_close)
+        save_button = ctk.CTkButton(button_frame_popup, text="Kaydet ve Kapat", command=save_and_close)
         save_button.pack()
 
 
     def _build_dashboard_tab(self):
+        # Dashboard frame'ini notebook'tan al
+        dashboard_tab = self.notebook.tab("Dashboard")
+
         # Eğer kütüphaneler eksikse, uyarı göster ve çık
         if not LIBS_AVAILABLE:
-            error_label = ttk.Label(
-                self.dashboard_frame,
+            error_label = ctk.CTkLabel(
+                dashboard_tab,
                 text=LIBS_ERROR_MESSAGE,
                 justify="center",
-                font=("Segoe UI", 12)
+                font=ctk.CTkFont(size=12)
             )
             error_label.pack(expand=True, fill="both", padx=20, pady=20)
             return
@@ -298,48 +243,48 @@ class LogGozcusuGUI:
         self.df_threats = pd.DataFrame()
 
         # Dashboard için ana kontrol frame'i
-        controls_frame = ttk.Frame(self.dashboard_frame)
-        controls_frame.pack(side="top", fill="x", pady=(0, 10))
+        controls_frame = ctk.CTkFrame(dashboard_tab)
+        controls_frame.pack(side="top", fill="x", pady=(5, 10))
 
-        btn_refresh = ttk.Button(controls_frame, text="Verileri Yenile", command=self.refresh_dashboard)
-        btn_refresh.pack(side="left", padx=(0, 20))
+        btn_refresh = ctk.CTkButton(controls_frame, text="Verileri Yenile", command=self.refresh_dashboard)
+        btn_refresh.pack(side="left", padx=10, pady=10)
 
         # IP Arama
-        ttk.Label(controls_frame, text="IP Ara:").pack(side="left", padx=(10, 5))
-        self.ip_search_var = tk.StringVar()
-        ip_entry = ttk.Entry(controls_frame, textvariable=self.ip_search_var)
+        ctk.CTkLabel(controls_frame, text="IP Ara:").pack(side="left", padx=(10, 5))
+        self.ip_search_var = ctk.StringVar()
+        ip_entry = ctk.CTkEntry(controls_frame, textvariable=self.ip_search_var)
         ip_entry.pack(side="left", padx=5)
-        btn_ip_search = ttk.Button(controls_frame, text="Ara", command=self._apply_filters_and_redraw)
+        btn_ip_search = ctk.CTkButton(controls_frame, text="Ara", command=self._apply_filters_and_redraw, width=50)
         btn_ip_search.pack(side="left", padx=5)
 
         # Kategori Filtresi
-        ttk.Label(controls_frame, text="Kategori:").pack(side="left", padx=(10, 5))
-        self.category_filter_var = tk.StringVar(value="Tümü")
+        ctk.CTkLabel(controls_frame, text="Kategori:").pack(side="left", padx=(10, 5))
+        self.category_filter_var = ctk.StringVar(value="Tümü")
         # OptionMenu'nün anında güncelleme yapması için trace kullanıyoruz
         self.category_filter_var.trace_add("write", lambda *_: self._apply_filters_and_redraw())
-        self.category_filter_menu = ttk.OptionMenu(
+        self.category_filter_menu = ctk.CTkOptionMenu(
             controls_frame, 
-            self.category_filter_var, 
-            "Tümü"
+            variable=self.category_filter_var, 
+            values=["Tümü"]
         )
         self.category_filter_menu.pack(side="left", padx=5)
 
 
         # Grafiklerin yer alacağı alan
-        self.charts_frame = ttk.Frame(self.dashboard_frame)
+        self.charts_frame = ctk.CTkFrame(dashboard_tab, fg_color="transparent")
         self.charts_frame.pack(side="bottom", fill="both", expand=True)
     
         # Grafik alanlarını oluştur (Dikey olarak alt alta)
-        self.chart1_frame = ttk.Frame(self.charts_frame)
-        self.chart1_frame.pack(side="top", fill="both", expand=True, pady=5)
+        self.chart1_frame = ctk.CTkFrame(self.charts_frame)
+        self.chart1_frame.pack(side="top", fill="both", expand=True, pady=(0,5))
         
-        self.chart2_frame = ttk.Frame(self.charts_frame)
+        self.chart2_frame = ctk.CTkFrame(self.charts_frame)
         self.chart2_frame.pack(side="top", fill="both", expand=True, pady=5)
         
-        self.chart3_frame = ttk.Frame(self.charts_frame)
-        self.chart3_frame.pack(side="top", fill="both", expand=True, pady=5)
+        self.chart3_frame = ctk.CTkFrame(self.charts_frame)
+        self.chart3_frame.pack(side="top", fill="both", expand=True, pady=(5,0))
 
-    def _clear_frame(self, frame: ttk.Frame):
+    def _clear_frame(self, frame: ctk.CTkFrame):
         for widget in frame.winfo_children():
             widget.destroy()
 
@@ -351,29 +296,25 @@ class LogGozcusuGUI:
             self._clear_frame(frame)
 
         if not threat_data_path.exists():
-            error_label = ttk.Label(self.chart1_frame, text="Veri dosyası (threat_data.jsonl) bulunamadı.")
-            error_label.pack()
+            error_label = ctk.CTkLabel(self.chart1_frame, text="Veri dosyası (threat_data.jsonl) bulunamadı.")
+            error_label.pack(pady=20)
             return
 
         try:
             self.df_threats = pd.read_json(threat_data_path, lines=True)
             if self.df_threats.empty:
-                error_label = ttk.Label(self.chart1_frame, text="Tehdit verisi bulunamadı.")
-                error_label.pack()
+                error_label = ctk.CTkLabel(self.chart1_frame, text="Tehdit verisi bulunamadı.")
+                error_label.pack(pady=20)
                 return
         except Exception as e:
             self.df_threats = pd.DataFrame()
-            error_label = ttk.Label(self.chart1_frame, text=f"Veri okuma hatası:\n{e}")
-            error_label.pack()
+            error_label = ctk.CTkLabel(self.chart1_frame, text=f"Veri okuma hatası:\n{e}")
+            error_label.pack(pady=20)
             return
         
         # Kategori filtresi menüsünü güncelle
-        menu = self.category_filter_menu["menu"]
-        menu.delete(0, "end")
         categories = ["Tümü"] + sorted(self.df_threats['category'].unique().tolist())
-        for cat in categories:
-            # Komutun doğru değeri yakalaması için lambda'da value=cat kullan
-            menu.add_command(label=cat, command=tk._setit(self.category_filter_var, cat))
+        self.category_filter_menu.configure(values=categories)
         
         # Filtreleri uygula ve çiz
         self._apply_filters_and_redraw()
@@ -399,8 +340,8 @@ class LogGozcusuGUI:
             filtered_df = filtered_df[filtered_df['category'] == category_filter]
         
         if filtered_df.empty:
-            error_label = ttk.Label(self.chart1_frame, text="Filtre ile eşleşen veri bulunamadı.")
-            error_label.pack()
+            error_label = ctk.CTkLabel(self.chart1_frame, text="Filtre ile eşleşen veri bulunamadı.")
+            error_label.pack(pady=20)
             return
 
         # Grafik oluşturma fonksiyonlarını çağır
@@ -408,12 +349,25 @@ class LogGozcusuGUI:
         self._draw_top_ips_chart(filtered_df, self.chart2_frame)
         self._draw_attack_types_chart(filtered_df, self.chart3_frame)
     
-    def _draw_attack_types_chart(self, df: "pd.DataFrame", parent_frame: ttk.Frame):
+    def _draw_attack_types_chart(self, df: "pd.DataFrame", parent_frame: ctk.CTkFrame):
         """Saldırı türlerini gösteren pasta grafik çizer."""
         attack_types = df['category'].value_counts()
+        
+        try:
+            # Tema renklerini doğru şekilde al
+            bg_color_tuple = parent_frame.cget("fg_color")
+            current_mode = ctk.get_appearance_mode()
+            bg_color = bg_color_tuple[1] if current_mode == "Dark" else bg_color_tuple[0]
+            
+            text_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+        except (KeyError, IndexError):
+            # Tema okuma başarısız olursa varsayılan renklere dön
+            bg_color = "white"
+            text_color = "black"
 
+        
         fig, ax = plt.subplots(figsize=(5, 4), dpi=100)
-        fig.patch.set_facecolor(self.colors["bg_light"])
+        fig.patch.set_facecolor(bg_color)
         
         wedges, texts, autotexts = ax.pie(
             attack_types, 
@@ -421,104 +375,117 @@ class LogGozcusuGUI:
             autopct='%1.1f%%',
             startangle=90,
             pctdistance=0.85,
-            textprops={'color': self.colors["fg_light"]}
+            textprops={'color': text_color}
         )
         
-        # Etiketlerin (autotext) rengini ayarla
         for autotext in autotexts:
-            autotext.set_color(self.colors["bg_dark"])
+            autotext.set_color("white")
             autotext.set_fontweight('bold')
 
-        # Dairenin ortasını boşaltarak donut chart yap
-        centre_circle = plt.Circle((0,0),0.70,fc=self.colors["bg_light"])
+        centre_circle = plt.Circle((0,0),0.70,fc=bg_color)
         fig.gca().add_artist(centre_circle)
 
-        ax.axis('equal')  # Eşit oranlar, pie'nin daire olmasını sağlar
-        ax.set_title("Saldırı Türü Dağılımı", color=self.colors["fg_light"], pad=20)
+        ax.axis('equal')
+        ax.set_title("Saldırı Türü Dağılımı", color=text_color, pad=20)
         
         plt.tight_layout()
 
         canvas = FigureCanvasTkAgg(fig, master=parent_frame)
         canvas.draw()
-        canvas.get_tk_widget().pack(fill='both', expand=True)
+        canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
 
-    def _draw_top_ips_chart(self, df: "pd.DataFrame", parent_frame: ttk.Frame):
+    def _draw_top_ips_chart(self, df: "pd.DataFrame", parent_frame: ctk.CTkFrame):
         """En çok saldıran IP'leri gösteren çubuk grafik çizer."""
         top_ips = df['ip'].value_counts().nlargest(10).sort_values()
 
-        fig, ax = plt.subplots(figsize=(10, 4), dpi=100) # figsize değiştirildi
-        fig.patch.set_facecolor(self.colors["bg_light"])
-        ax.set_facecolor(self.colors["bg_dark"])
-
-        ax.tick_params(axis='x', colors=self.colors["fg_light"])
-        ax.tick_params(axis='y', colors=self.colors["fg_light"])
-        ax.spines['left'].set_color(self.colors["fg_light"])
-        ax.spines['right'].set_color(self.colors["bg_dark"])
-        ax.spines['top'].set_color(self.colors["bg_dark"])
-        ax.spines['bottom'].set_color(self.colors["fg_light"])
-
-        ax.set_title("Top 10 Saldırgan IP Adresi", color=self.colors["fg_light"])
+        try:
+            # Tema renklerini doğru şekilde al
+            bg_color_tuple = parent_frame.cget("fg_color")
+            current_mode = ctk.get_appearance_mode()
+            bg_color = bg_color_tuple[1] if current_mode == "Dark" else bg_color_tuple[0]
+            
+            text_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+            accent_color = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
+        except (KeyError, IndexError):
+             # Tema okuma başarısız olursa varsayılan renklere dön
+            bg_color = "white"
+            text_color = "black"
+            accent_color = "#3B8ED0" # Default CTk blue
         
-        top_ips.plot(kind='barh', ax=ax, color=self.colors["accent_red"])
-        ax.set_xlabel("Saldırı Sayısı", color=self.colors["fg_light"])
-        ax.set_ylabel("IP Adresi", color=self.colors["fg_light"])
+        fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
+
+        ax.tick_params(axis='x', colors=text_color)
+        ax.tick_params(axis='y', colors=text_color)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(text_color)
+
+        ax.set_title("Top 10 Saldırgan IP Adresi", color=text_color)
+        
+        top_ips.plot(kind='barh', ax=ax, color=accent_color)
+        ax.set_xlabel("Saldırı Sayısı", color=text_color)
+        ax.set_ylabel("IP Adresi", color=text_color)
         
         plt.tight_layout()
 
         canvas = FigureCanvasTkAgg(fig, master=parent_frame)
         canvas.draw()
-        canvas.get_tk_widget().pack(fill='both', expand=True)
+        canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
 
-    def _draw_threats_by_time_chart(self, df: "pd.DataFrame", parent_frame: ttk.Frame):
+    def _draw_threats_by_time_chart(self, df: "pd.DataFrame", parent_frame: ctk.CTkFrame):
         """Günün saatine göre tehdit sayısını gösteren çizgi grafik çizer."""
-        
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        # .dt.hour kullanarak günün saatine göre grupla
-        threats_by_hour_of_day = df.groupby(df['timestamp'].dt.hour).size()
-        # 0-23 arası tüm saatlerin olmasını garantile
-        threats_by_hour_of_day = threats_by_hour_of_day.reindex(range(24), fill_value=0)
+        threats_by_hour_of_day = df.groupby(df['timestamp'].dt.hour).size().reindex(range(24), fill_value=0)
 
-
-        # Matplotlib Figürünü oluştur (koyu tema)
+        try:
+            # Tema renklerini doğru şekilde al
+            bg_color_tuple = parent_frame.cget("fg_color")
+            current_mode = ctk.get_appearance_mode()
+            bg_color = bg_color_tuple[1] if current_mode == "Dark" else bg_color_tuple[0]
+            
+            text_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+            accent_color_tuple = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
+            accent_color = accent_color_tuple[1] if current_mode == "Dark" else accent_color_tuple[0]
+        except (KeyError, IndexError):
+            # Tema okuma başarısız olursa varsayılan renklere dön
+            bg_color = "white"
+            text_color = "black"
+            accent_color = "#3B8ED0" # Default CTk blue
+        
         fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
-        fig.patch.set_facecolor(self.colors["bg_light"])
-        ax.set_facecolor(self.colors["bg_dark"])
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
 
-        # Eksen ve etiket renkleri
-        ax.tick_params(axis='x', colors=self.colors["fg_light"], rotation=0)
-        ax.tick_params(axis='y', colors=self.colors["fg_light"])
-        ax.spines['left'].set_color(self.colors["fg_light"])
-        ax.spines['right'].set_color(self.colors["bg_dark"])
-        ax.spines['top'].set_color(self.colors["bg_dark"])
-        ax.spines['bottom'].set_color(self.colors["fg_light"])
+        ax.tick_params(axis='x', colors=text_color, rotation=0)
+        ax.tick_params(axis='y', colors=text_color)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(text_color)
         
-        # Başlık ve etiketler
-        ax.set_title("Günün Saatlerine Göre Saldırı Yoğunluğu", color=self.colors["fg_light"])
-        ax.set_ylabel("Toplam Tehdit Sayısı", color=self.colors["fg_light"])
-        ax.set_xlabel("Günün Saati", color=self.colors["fg_light"])
-        ax.set_xticks(range(0, 24, 2)) # X ekseninde her 2 saatte bir etiket göster
+        ax.set_title("Günün Saatlerine Göre Saldırı Yoğunluğu", color=text_color)
+        ax.set_ylabel("Toplam Tehdit Sayısı", color=text_color)
+        ax.set_xlabel("Günün Saati", color=text_color)
+        ax.set_xticks(range(0, 24, 2))
         
-        # Grafiği çiz
-        threats_by_hour_of_day.plot(kind='line', ax=ax, color=self.colors["accent_green"], marker='o', markersize=4)
+        threats_by_hour_of_day.plot(kind='line', ax=ax, color=accent_color, marker='o', markersize=4)
         
         fig.tight_layout()
 
-        # Tkinter canvas'ına göm
         canvas = FigureCanvasTkAgg(fig, master=parent_frame)
         canvas.draw()
-        canvas.get_tk_widget().pack(fill='both', expand=True)
+        canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
 
 
     def _update_status_label(self, status_text: str, state: str):
         color_map = {
-            "running": self.colors["accent_green"],
-            "stopped": self.colors["accent_red"],
-            "error": self.colors["accent_red"],
-            "default": self.colors["fg_light"],
+            "running": "#2CC985", # Yeşil
+            "stopped": "#E64444", # Kırmızı
+            "error": "#E64444",
+            "default": ctk.ThemeManager.theme["CTkLabel"]["text_color"]
         }
-        self.status_label.config(
+        self.status_label.configure(
             text=f"Durum: {status_text}",
-            foreground=color_map.get(state, self.colors["fg_light"])
+            text_color=color_map.get(state, color_map["default"])
         )
 
     def start_from_start_screen(self):
@@ -531,16 +498,29 @@ class LogGozcusuGUI:
             self._append_log("[INFO] Ajan zaten çalışıyor.\n")
             return
 
+        # Sanal ortamın python'unu kullan
+        python_executable = sys.executable
+        if ".venv" in python_executable:
+             # Eğer zaten venv'de çalışıyorsa direkt kullan
+             pass
+        else:
+            # Değilse, proje dizinindeki venv'i hedefle
+            venv_python_path = self.base_dir / ".venv" / "bin" / "python"
+            if venv_python_path.exists():
+                python_executable = str(venv_python_path)
+            else:
+                # venv bulunamazsa sistemdeki default'u kullanmayı dene
+                pass
+
+
         ajan_path = self.base_dir / "ajan.py"
         if not ajan_path.exists():
             self._append_log("[HATA] ajan.py bu klasörde bulunamadı.\n")
             self._update_status_label("ajan.py bulunamadı", "error")
             return
 
-        # Ortam değişkenlerini hazırla
         env = os.environ.copy()
         
-        # GUI'den girilen E-posta adresini ayarla
         user_email = self.email_to.get()
         if user_email:
             env["ALERT_EMAIL_TO"] = user_email
@@ -548,7 +528,6 @@ class LogGozcusuGUI:
         else:
             self._append_log("[UYARI] E-posta adresi girilmedi. Mail gönderimi devre dışı.\n")
 
-        # GUI'den girilen API anahtarını öncelikli olarak ayarla
         gui_api_key = self.api_key_var.get()
         if gui_api_key:
             env["LOG_GOZCUSU_GUI_API_KEY"] = gui_api_key
@@ -559,14 +538,14 @@ class LogGozcusuGUI:
 
         try:
             self.proc = subprocess.Popen(
-                [sys.executable, "-u", str(ajan_path)],
+                [python_executable, "-u", str(ajan_path)],
                 cwd=self.base_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                env=env # Güncellenmiş ortam değişkenlerini kullan
+                env=env
             )
         except Exception as e:
             self._append_log(f"[HATA] Ajan başlatılamadı: {e}\n")
@@ -624,17 +603,21 @@ class LogGozcusuGUI:
         self.root.after(100, self._poll_log_queue)
 
     def _append_log(self, text: str):
+        self.log_text.tag_config("attack", foreground="#E64444")
+        self.log_text.tag_config("warning", foreground="#FFA500")
+        self.log_text.tag_config("error", foreground="#E64444")
+        self.log_text.tag_config("info", foreground="#2CC985")
+
+        tag = None
         if "!" in text:
-            self.log_text.tag_configure("attack", foreground=self.colors["accent_red"], font=("Consolas", 10, "bold"))
             tag = "attack"
         elif "[UYARI]" in text:
-            self.log_text.tag_configure("warning", foreground="#FFA500")
             tag = "warning"
         elif "[HATA]" in text:
-            self.log_text.tag_configure("error", foreground=self.colors["accent_red"])
             tag = "error"
-        else:
-            tag = None
+        elif "[INFO]" in text or "[LOG GÖZCÜSÜ]" in text:
+            tag = "info"
+
 
         self.log_text.configure(state="normal")
         if tag:
@@ -650,7 +633,10 @@ class LogGozcusuGUI:
 
 
 def main():
-    root = tk.Tk()
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+    
+    root = ctk.CTk()
     app = LogGozcusuGUI(root)
     root.mainloop()
 

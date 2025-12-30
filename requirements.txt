@@ -1,0 +1,9 @@
+# Bu dosya, projenin çalışması için gerekli Python kütüphanelerini listeler.
+# Kurulum için: pip install -r requirements.txt
+# yüklemeyi unutma! (dont forget installl)
+
+customtkinter
+pandas
+matplotlib
+
+gemini1
