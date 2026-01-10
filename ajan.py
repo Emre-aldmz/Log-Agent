@@ -2,6 +2,7 @@ import re
 import time
 import json
 import os
+import subprocess
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
@@ -167,7 +168,7 @@ def analyze_with_ai(client: Any, log_line: str) -> Optional[Dict[str, Any]]:
         "model": client["model"],
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1,
-        "max_tokens": 256,   # kredi/tokens için sınır
+        "max_tokens": 100,   # kredi/tokens için sınır (Tekrar Düşürüldü)
     }
 
     resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=45)
@@ -223,7 +224,7 @@ def ai_parse_log_structure(client: Any, log_line: str) -> Optional[Dict[str, Any
         "model": client["model"],
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.0,
-        "max_tokens": 256,
+        "max_tokens": 100,
     }
 
     resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=30)
@@ -261,6 +262,48 @@ def ai_parse_log_structure(client: Any, log_line: str) -> Optional[Dict[str, Any
         "ua": ua,
     }
     return parsed
+
+
+def generate_regex_from_ai(client: Any, log_line: str, category: str) -> Optional[str]:
+    """
+    Saldırıyı tespit eden AI'dan, bu saldırıyı yakalayacak bir REGEX üretmesini ister.
+    """
+    if not client:
+        return None
+
+    prompt = (
+        "You are a regex expert for cyber security.\n"
+        f"I have a log line detected as an attack (Category: {category}).\n"
+        "Input Log Line:\n"
+        f"{log_line}\n\n"
+        "Task: Create a SAFE Python regex pattern to detect this specific attack payload.\n"
+        "Rules:\n"
+        "1. The regex must match the malicious part (payload).\n"
+        "2. Do NOT match normal traffic (avoid false positives).\n"
+        "3. Do NOT use complex lookbehinds if possible.\n"
+        "4. Return ONLY the regex string in JSON format: {\"pattern\": \"...\"}\n"
+    )
+
+    payload = {
+        "model": client["model"],
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": 80,
+    }
+
+    resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=30)
+    if not resp:
+        return None
+
+    try:
+        content = resp["choices"][0]["message"]["content"]
+        obj = _extract_json_object(content)
+        if obj and "pattern" in obj:
+            return obj["pattern"]
+    except Exception as e:
+        print(f"[UYARI] Regex üretimi başarısız: {e}")
+    
+    return None
 
 
 # ==========================
@@ -302,13 +345,58 @@ def send_email_alert(subject: str, body: str):
     msg.set_content(body)
 
     try:
-        print("[DEBUG] send_email_alert çağrıldı, mail gönderilmeye çalışılıyor...", flush=True)
+        # print("[DEBUG] send_email_alert çağrıldı, mail gönderilmeye çalışılıyor...", flush=True)
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(smtp_user, smtp_pass)
             smtp.send_message(msg)
-        print("[LOG GÖZCÜSÜ] Uyarı maili gönderildi.", flush=True)
+        # print("[LOG GÖZCÜSÜ] Uyarı maili gönderildi.", flush=True)
     except Exception as e:
         print(f"[UYARI] Mail gönderilemedi: {e}", flush=True)
+
+
+def ask_security_assistant(client: Any, context_data: str, user_question: str) -> str:
+    """
+    Kullanıcının doğal dilde sorduğu soruları, eldeki log/tehdit verisine bakarak yanıtlar.
+    """
+    if not client:
+        return "AI İstemcisi başlatılamadı (API Anahtarı eksik)."
+
+    # Context verisi çok uzunsa kırp (Token limitini aşmamak için)
+    # Basit bir kırpma: son 4000 karakter
+    if len(context_data) > 8000:
+        context_data = "...(önceki veriler kırpıldı)...\n" + context_data[-8000:]
+
+    prompt = (
+        "You are 'Log Gözcüsü Asistanı', a helpful cyber security expert AI.\n"
+        "You have access to the following threat logs/summaries:\n"
+        "--- START Data ---\n"
+        f"{context_data}\n"
+        "--- END DATA ---\n\n"
+        "User Question:\n"
+        f"{user_question}\n\n"
+        "Instructions:\n"
+        "1. Answer in Turkish (Türkçe).\n"
+        "2. Be concise and professional.\n"
+        "3. Base your answer ONLY on the provided data and general security knowledge.\n"
+        "4. If the answer is not in the data, say so.\n"
+    )
+
+    payload = {
+        "model": client["model"],
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 150,
+    }
+
+    resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=60)
+    if not resp:
+        return "AI servisine erişilemedi veya zaman aşımı oluştu."
+
+    try:
+        content = resp["choices"][0]["message"]["content"]
+        return content
+    except Exception as e:
+        return f"Cevap işlenirken hata oluştu: {e}"
 
 
 
@@ -357,6 +445,7 @@ class ThreatModel:
     def __init__(self, rules_path: Path) -> None:
         self.rules_path = rules_path
         self._compiled = []
+        self.rules = []
         self._load_rules()
 
     def _load_rules(self):
@@ -364,10 +453,10 @@ class ThreatModel:
             raise FileNotFoundError(f"Kural dosyası bulunamadı: {self.rules_path}")
 
         with self.rules_path.open("r", encoding="utf-8") as f:
-            rules = json.load(f)
+            self.rules = json.load(f)
 
         compiled_rules = []
-        for rule in rules:
+        for rule in self.rules:
             if not rule.get("enabled", True):
                 continue
             pattern = rule.get("pattern")
@@ -392,6 +481,160 @@ class ThreatModel:
                 return rule, m
         return None, None
 
+    def add_rule(self, new_rule: Dict[str, Any]):
+        """Yeni bir kural ekler ve kaydeder."""
+        # Memory'ye ekle
+        self.rules.append(new_rule)
+        
+        # Compile et ve listeye ekle
+        try:
+            c = re.compile(new_rule["pattern"])
+            rule_copy = dict(new_rule)
+            rule_copy["compiled"] = c
+            self._compiled.append(rule_copy)
+        except re.error as e:
+            print(f"[UYARI] Yeni kural derlenemedi: {e}")
+            
+        # Dosyaya kaydet
+        self.save_rules()
+        
+    def save_rules(self, path: Path = None):
+        """Kuralları dosyaya kaydeder."""
+        target = path or self.rules_path
+        with target.open("w", encoding="utf-8") as f:
+            json.dump(self.rules, f, indent=2, ensure_ascii=False)
+        return None, None
+        
+    def add_rule(self, rule_dict: dict) -> bool:
+        """Yeni bir kuralı JSON dosyasına ekler ve hafızayı günceller."""
+        try:
+            # 1. Mevcut dosyayı oku
+            with self.rules_path.open("r", encoding="utf-8") as f:
+                current_rules = json.load(f)
+            
+            # 2. Yeni kuralı ekle
+            current_rules.append(rule_dict)
+            
+            # 3. Dosyayı (indent=2 ile) yeniden yaz
+            with self.rules_path.open("w", encoding="utf-8") as f:
+                json.dump(current_rules, f, ensure_ascii=False, indent=2)
+            
+            print(f"[ThreatModel] Yeni kural eklendi: {rule_dict.get('id')}")
+            
+            # 4. Modeli canlı güncelle
+            self._load_rules()
+            return True
+        except Exception as e:
+            print(f"[HATA] Yeni kural eklenirken hata: {e}")
+            return False
+
+
+# ==========================
+# Active Defense (Aktif Savunma)
+# ==========================
+
+class ActiveDefense:
+    def __init__(self, logger=None):
+        self.logger = logger
+        self.enabled = os.environ.get("ACTIVE_DEFENSE_ENABLED", "false").lower() == "true"
+        self.dry_run = os.environ.get("ACTIVE_DEFENSE_DRY_RUN", "true").lower() == "true"
+        
+        # Kendimizi kilitlememek için beyaz liste
+        self.whitelist = {
+            "127.0.0.1", 
+            "localhost", 
+            "::1", 
+            "0.0.0.0"
+        }
+        
+        if self.enabled:
+            mode = "SIMÜLASYON (Dry Run)" if self.dry_run else "AKTİF (Canlı Engel)"
+            self._log(f"[ActiveDefense] Mod: {mode}")
+        else:
+            self._log("[ActiveDefense] Devre dışı.")
+
+    def _log(self, msg):
+        if self.logger:
+            self.logger(msg, "DEFENSE")
+        # else: print(msg) # Sessiz mod
+
+    def block_ip(self, ip: str, reason: str = "Tehdit algılandı") -> bool:
+        if not self.enabled:
+            return False
+            
+        if not ip:
+            return False
+
+        # Beyaz liste kontrolü
+        if ip in self.whitelist or ip.startswith("192.168.") or ip.startswith("10."):
+            self._log(f"{ip} beyaz listede, engellenmedi.")
+            return False
+
+        cmd = ["sudo", "iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"]
+        log_msg = f"{ip} engelleniyor... Sebep: {reason}"
+        
+        if self.dry_run:
+            self._log(f"[DRY-RUN] {log_msg}")
+            self._log(f"[DRY-RUN] Komut: {' '.join(cmd)}")
+            return True
+        
+        try:
+            self._log(log_msg)
+            import subprocess
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            self._log(f"{ip} başarıyla engellendi.")
+            return True
+        except Exception as e:
+            self._log(f"IP engelleme başarısız: {e}")
+            return False
+
+
+# ==========================
+# AnomalyDetector (İstatistiksel Anomali)
+# ==========================
+
+class AnomalyDetector:
+    def __init__(self, window_seconds: int = 60, threshold_multiplier: float = 3.0):
+        self.window = window_seconds
+        self.multiplier = threshold_multiplier
+        self.history = []
+        self.baseline_req_per_min = 20.0 # Varsayılan başlangıç
+        self.learning_mode = True
+        self.last_check = time.time()
+        
+    def record_request(self):
+        now = time.time()
+        self.history.append(now)
+        # Süresi dolanları temizle
+        self.history = [t for t in self.history if t > now - self.window]
+        
+    def check_anomaly(self) -> Optional[Dict[str, Any]]:
+        count = len(self.history)
+        
+        # Basit öğrenme: İlk 5 dakika ortalamayı güncelle
+        if self.learning_mode:
+            self.baseline_req_per_min = max(self.baseline_req_per_min, count)
+            if len(self.history) > 100: # Yeterli veri olunca öğrenmeyi hafiflet
+                self.learning_mode = False
+            return None
+            
+        # Kontrol (Dakikada en fazla 1 kez raporla)
+        if time.time() - self.last_check < 60:
+            return None
+            
+        self.last_check = time.time()
+        
+        # Eşik değeri kontrolü
+        threshold = self.baseline_req_per_min * self.multiplier
+        if count > threshold and count > 50: # En az 50 istek olmalı
+            return {
+                "type": "Traffic Spike",
+                "count": count,
+                "baseline": self.baseline_req_per_min,
+                "threshold": threshold,
+                "severity": "medium"
+            }
+        return None
 
 # ==========================
 # LogWatcherAgent
@@ -408,29 +651,71 @@ class LogWatcherAgent:
         rules_path: Path,
         poll_interval: float = 1.0,
         status_interval_seconds: int = 300,
+        log_callback: Optional[Any] = None # Yeni argüman
     ):
         self.log_path = log_path
         self.report_path = report_path
         self.status_path = status_path
         self.analysis_path = analysis_path
-        self.threat_data_path = threat_data_path  # Eklendi
+        self.threat_data_path = threat_data_path
         self.poll_interval = poll_interval
         self.status_interval = timedelta(seconds=status_interval_seconds)
+        self.log_callback = log_callback
 
         self.model = ThreatModel(rules_path)
         self.ai_client = create_ai_client()
+        self.defender = ActiveDefense(logger=log_callback) # Logger'ı geçir
+        self.anomaly_detector = AnomalyDetector() # Anomali tespiti
+
+        # Öğrenme mekanizması için yanlış pozitif listesi
+        self.false_positives = set()
+        self._load_false_positives()
 
         self.total_lines = 0
         self.total_attacks = 0
         self.attacks_by_category: Dict[str, int] = {}
         self.last_status_time = datetime.now()
+        
+        # HoneyPot Tuzakları (Bu URL'lere gelen her istek direkt saldırıdır)
+        self.honeypot_urls = [
+            "/admin-login", 
+            "/wp-admin", 
+            "/config.php", 
+            "/.env", 
+            "/backup.sql",
+            "/phpmyadmin",
+            "/manager/html"
+        ]
+
+    def _load_false_positives(self):
+        """Daha önce 'yanlış alarm' olarak işaretlenmiş logları hafızaya yükler."""
+        if not self.threat_data_path.exists():
+            return
+        
+        try:
+            with self.threat_data_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        threat = json.loads(line)
+                        if threat.get("feedback") == "false_positive":
+                            log_entry = threat.get("log_entry")
+                            if log_entry:
+                                self.false_positives.add(log_entry.strip())
+                    except json.JSONDecodeError:
+                        continue
+            if self.false_positives:
+                print(f"[INFO] {len(self.false_positives)} adet öğrenilmiş yanlış alarm kaydı yüklendi.")
+        except Exception as e:
+            print(f"[UYARI] Yanlış alarm verileri okunamadı: {e}")
 
     def _follow_log(self):
         with self.log_path.open("r", encoding="utf-8", errors="ignore") as f:
+            # Dosyanın sonuna git (sadece yeni satırları oku)
+            # f.seek(0, 2) 
             while True:
                 line = f.readline()
                 if line:
-                    scan_animation()
+                    # scan_animation() # Performans için kaldırıldı
                     yield line
                 else:
                     time.sleep(self.poll_interval)
@@ -509,11 +794,18 @@ class LogWatcherAgent:
 
         details_lines.append(f"Log Satırı: {raw_line.strip()}")
 
-        print("!" * 80)
-        typewriter(header, delay=0.005)
-        for line in details_lines:
-            typewriter(line, delay=0.003)
-        print("!" * 80)
+        details_lines.append(f"Log Satırı: {raw_line.strip()}")
+
+        # Callback varsa oraya gönder, yoksa print (CLI modunda çalışıyorsa)
+        if self.log_callback:
+             full_report = f"{header}\n" + "\n".join(details_lines)
+             self.log_callback(full_report, "TEHDIT")
+        else:
+             print("!" * 80)
+             typewriter(header, delay=0.005)
+             for line in details_lines:
+                 typewriter(line, delay=0.003)
+             print("!" * 80)
 
         details_text = "\n".join(details_lines) + "\n"
         with self.report_path.open("a", encoding="utf-8") as f:
@@ -525,7 +817,7 @@ class LogWatcherAgent:
         cat = rule["category"]
         self.attacks_by_category[cat] = self.attacks_by_category.get(cat, 0) + 1
 
-        # Yapısal JSON verisini `threat_data.jsonl` dosyasına yaz
+        # Yapısal JSON verisini `threat_data.jsonl` dosyasını yaz
         try:
             threat_data = {
                 "timestamp": timestamp,
@@ -535,13 +827,22 @@ class LogWatcherAgent:
                 "severity": rule.get("severity"),
                 "confidence": rule.get("confidence"),
                 "source": (extra_info or {}).get("source", "rule-based"),
-                "log_line": raw_line.strip(),
+                "log_entry": raw_line.strip(),
+                "feedback": "unverified" # Yeni eklenen alan
             }
             with self.threat_data_path.open("a", encoding="utf-8") as f:
-                json.dump(threat_data, f)
+                json.dump(threat_data, f, ensure_ascii=False)
                 f.write("\n")
         except Exception as e:
             print(f"[UYARI] JSON veri dosyasına yazılamadı: {e}", flush=True)
+
+
+        # AKTİF SAVUNMA MÜDAHALESİ
+        # Eğer tehdit seviyesi "critical" veya confidence "definite" ise IP'yi engelle
+        if rule.get("severity") == "critical" or rule.get("confidence") == "definite":
+            attacker_ip = p.get("ip")
+            if attacker_ip:
+                self.defender.block_ip(attacker_ip, reason=f"{rule['category']} ({rule.get('id')})")
 
 
         subject = "[LOG GÖZCÜSÜ] " + rule["category"] + " tespit edildi"
@@ -592,10 +893,73 @@ class LogWatcherAgent:
             if not raw_line.strip():
                 continue
 
+            # Öğrenme: Eğer bu log daha önce yanlış alarm olarak işaretlendiyse atla
+            if raw_line.strip() in self.false_positives:
+                print(f"[INFO] Öğrenilmiş yanlış alarm, atlanıyor: {raw_line[:80]}...")
+                continue
+
             print(f"[DEBUG] Yeni log satırı algılandı: {raw_line!r}")
             self.total_lines += 1
+            
+            # 0) İstatistiksel Anomali Kaydı
+            self.anomaly_detector.record_request()
+            anomaly = self.anomaly_detector.check_anomaly()
+            if anomaly:
+                print(f"[ANOMALI] Trafik artışı tespit edildi! Değer: {anomaly['count']}")
+                # Anomaliyi, sanki bir saldırıymış gibi işle
+                anom_rule = {
+                    "id": "TRAFFIC_SPIKE",
+                    "category": anomaly["type"],
+                    "severity": anomaly["severity"],
+                    "confidence": "suspicious",
+                    "description": f"Anormal trafik artışı ({anomaly['count']} istek/dk, Eşik: {anomaly['threshold']:.1f})"
+                }
+                anom_extra = {
+                    "source": "AnomalyDetector",
+                    "label": "warning",
+                    "probable_category": "Traffic Spike",
+                    "reason": f"Request count {anomaly['count']} exceeded baseline {anomaly['baseline']:.1f}"
+                }
+                # Direkt aksiyon yerine rapora düş
+                self._write_analysis(raw_line, {}, anom_extra)
+                # İsterseniz act_on_attack ile engelleyebilirsiniz ama false positive riski yüksek
+                # self.act_on_attack(raw_line, {}, anom_rule, anom_extra) 
 
             parsed = parse_apache_log_line(raw_line)
+
+
+            # ==========================
+            # HONEYPOT KONTROLÜ
+            # ==========================
+            # Log satırında tuzak URL'lerden biri geçiyor mu?
+            honeypot_match = next((url for url in self.honeypot_urls if url in raw_line), None)
+            
+            if honeypot_match:
+                print(f"[HONEYPOT] TUZAK TETİKLENDİ! URL: {honeypot_match}")
+                
+                hp_rule = {
+                    "id": "HONEYPOT_TRAP",
+                    "category": "HoneyPot Trap",
+                    "severity": "critical",
+                    "confidence": "definite",
+                    "description": f"Tuzak URL erişimi tespit edildi: {honeypot_match}"
+                }
+                
+                hp_extra = {
+                    "source": "HoneyPot",
+                    "label": "attack",
+                    "probable_category": "Trap Triggered",
+                    "reason": f"Access to honeypot path: {honeypot_match}"
+                }
+                
+                # Arşivle, Raporla ve ENGELLE
+                self._write_analysis(raw_line, parsed, hp_extra)
+                self.act_on_attack(raw_line, parsed, hp_rule, hp_extra)
+                
+                self._maybe_write_status()
+                continue # Diğer kontrollere gerek yok, direkt sonraki satıra geç
+            # ==========================
+
             rule, _ = self.model.match(raw_line)
 
             # Parser bozulduysa mümkünse AI ile parse et (rapor kalitesini artırır)
@@ -618,6 +982,49 @@ class LogWatcherAgent:
                             }
                             verdict["source"] = "AI-only"
                             self.act_on_attack(raw_line, parsed, pseudo_rule, verdict)
+
+                            # ======================================================
+                            # SELF-LEARNING (OTO KURAL ÜRETİMİ)
+                            # ======================================================
+                            try:
+                                print(f"[ÖĞRENME] '{pseudo_rule['category']}' için kural öğreniliyor...")
+                                new_pattern = generate_regex_from_ai(self.ai_client, raw_line, pseudo_rule['category'])
+                                
+                                if new_pattern:
+                                    # Regex'in geçerli olup olmadığını test et
+                                    try:
+                                        re.compile(new_pattern)
+                                        is_valid_regex = True
+                                    except re.error:
+                                        print(f"[UYARI] Üretilen regex geçersiz: {new_pattern}")
+                                        is_valid_regex = False
+
+                                    if is_valid_regex:
+                                        # Kural ID'sini ve açıklamasını daha belirgin yapıyoruz
+                                        new_rule_id = f"LEARNED_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                                        new_rule = {
+                                            "id": new_rule_id,
+                                            "category": pseudo_rule['category'],
+                                            "severity": "medium",
+                                            "confidence": "suspicious",
+                                            "pattern": new_pattern,
+                                            "description": f"[AI-LEARNED] Otomatik öğrenildi. Kaynak: {raw_line.strip()[-40:]}",
+                                            "enabled": True,
+                                            "source": "auto-learning" # Ekstra bir metadata alanı
+                                        }
+                                        success = self.model.add_rule(new_rule)
+                                        if success:
+                                            print(f"[BAŞARI] Ajan yeni bir kural öğrendi! ({new_rule_id}) Pattern: {new_pattern}")
+                                        else:
+                                            print("[HATA] Kural kaydedilemedi.")
+                                    else:
+                                        print("[ÖĞRENME] Regex doğrulama başarısız.")
+                                else:
+                                    print("[ÖĞRENME] AI regex üretemedi.")
+                            except Exception as e:
+                                print(f"[HATA] Öğrenme sürecinde istisna: {e}")
+                            # ======================================================
+
                     else:
                         # AI cevap veremezse bile: satır işlendi bilgisini analiz raporuna düş
                         fallback = {
@@ -669,6 +1076,45 @@ class LogWatcherAgent:
                     if ai_verdict.get("label") == "attack":
                         ai_verdict["source"] = "rule + AI"
                         self.act_on_attack(raw_line, parsed, rule, ai_verdict)
+
+                        # ======================================================
+                        # SELF-LEARNING (OTO KURAL ÜRETİMİ) - Suspicious Rule Case
+                        # ======================================================
+                        # Eğer AI'nın belirlediği kategori, kuralın kategorisinden farklıysa
+                        # veya genel olarak "Other" değilse, daha spesifik bir kural öğrenmeye çalış.
+                        ai_cat = ai_verdict.get("probable_category", "Other")
+                        if ai_cat != rule.get("category") and ai_cat != "None":
+                            try:
+                                print(f"[ÖĞRENME] Mevcut kural ({rule['id']}) yetersiz olabilir. '{ai_cat}' için yeni kural öğreniliyor...")
+                                new_pattern = generate_regex_from_ai(self.ai_client, raw_line, ai_cat)
+                                
+                                if new_pattern:
+                                    try:
+                                        re.compile(new_pattern)
+                                        is_valid_regex = True
+                                    except re.error:
+                                        is_valid_regex = False
+
+                                    if is_valid_regex:
+                                        new_rule_id = f"LEARNED_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                                        new_rule = {
+                                            "id": new_rule_id,
+                                            "category": ai_cat,
+                                            "severity": "medium",
+                                            "confidence": "suspicious",
+                                            "pattern": new_pattern,
+                                            "description": f"[AI-LEARNED] Otomatik öğrenildi (Was: {rule['id']}). Kaynak: {raw_line.strip()[-40:]}",
+                                            "enabled": True,
+                                            "source": "auto-learning"
+                                        }
+                                        success = self.model.add_rule(new_rule)
+                                        if success:
+                                            print(f"[BAŞARI] Ajan kuralı özelleştirdi! ({new_rule_id}) Pattern: {new_pattern}")
+                                    else:
+                                        print(f"[ÖĞRENME] Regex geçersiz: {new_pattern}")
+                            except Exception as e:
+                                print(f"[HATA] Öğrenme hatası: {e}")
+                        # ======================================================
                     else:
                         # benign dese bile, şu an tehdit raporuna düşürmüyoruz
                         pass

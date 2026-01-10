@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log Gözcüsü - Dashboard</title>
+    <meta name="description" content="Siber güvenlik aj izleme paneli">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">🛡️</span>
+                <h1>Log Gözcüsü</h1>
+                <span class="badge">v1.0</span>
+            </div>
+            <div class="header-actions">
+                <div class="status-indicator" id="daemon-status">
+                    <span class="status-dot offline"></span>
+                    <span class="status-text">Kontrol ediliyor...</span>
+                </div>
+                <button class="btn btn-icon" onclick="refreshAll()" title="Yenile">🔄</button>
+            </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon threat">⚠️</div>
+                <div class="stat-content">
+                    <span class="stat-value" id="total-threats">-</span>
+                    <span class="stat-label">Toplam Tehdit</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon critical">🔴</div>
+                <div class="stat-content">
+                    <span class="stat-value" id="critical-count">-</span>
+                    <span class="stat-label">Kritik</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon lines">📊</div>
+                <div class="stat-content">
+                    <span class="stat-value" id="total-lines">-</span>
+                    <span class="stat-label">İşlenen Log</span>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Main Grid -->
+        <main class="main-grid">
+            <!-- Left Column: Charts -->
+            <div class="charts-column">
+                <!-- Category Chart -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📈 Saldırı Kategorileri</h2>
+                    </div>
+                    <div class="card-body chart-container">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Hourly Chart -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🕐 Saatlik Dağılım</h2>
+                    </div>
+                    <div class="card-body chart-container">
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Threats & Logs -->
+            <div class="data-column">
+                <!-- Top IPs -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🎯 En Aktif Saldırgan IP'ler</h2>
+                    </div>
+                    <div class="card-body">
+                        <table class="data-table" id="top-ips-table">
+                            <thead>
+                                <tr>
+                                    <th>IP Adresi</th>
+                                    <th>Saldırı Sayısı</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="2" class="loading">Yükleniyor...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recent Threats -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🚨 Son Tehditler</h2>
+                        <a href="#" onclick="showAllThreats()" class="card-action">Tümünü Gör →</a>
+                    </div>
+                    <div class="card-body threats-list" id="threats-list">
+                        <div class="loading">Yükleniyor...</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Live Logs Section -->
+        <section class="card full-width">
+            <div class="card-header">
+                <h2>📜 Canlı Log Akışı</h2>
+                <div class="log-controls">
+                    <label class="toggle">
+                        <input type="checkbox" id="auto-scroll" checked>
+                        <span>Otomatik Kaydır</span>
+                    </label>
+                    <button class="btn btn-small" onclick="clearLogs()">Temizle</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="log-viewer" id="log-viewer">
+                    <div class="log-line info">Bağlanıyor...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Log Gözcüsü - Agentic AI Security Tool | <span id="last-update">-</span></p>
+        </footer>
+    </div>
+
+    <!-- All Threats Modal -->
+    <div class="modal" id="threats-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Tüm Tehditler</h2>
+                <button class="btn-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="all-threats-list">
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

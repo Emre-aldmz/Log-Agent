@@ -1,0 +1,44 @@
+GOREV: Asagidaki proje icin bir YAZILI VIDEO SENARYOSU (TEXT SCRIPT) hazirla.
+(Lutfen video dosyasi olusturmaya calisma, sadece metin ve senaryo yaz.)
+
+Sen profesyonel bir Video Senaristi (Screenwriter) ve teknoloji anlaticisisin. Asagidaki proje detaylarini kullanarak, bu projeyi anlatan etkileyici bir tanitim videosu icin metin tabanli akis hazirla.
+
+PROJE HAKKINDA
+Adi: Log Gozcusu (Agentic AI Security Tool)
+Amaci: Web sunucusu loglarini (access.log) gercek zamanli izleyip, yapay zeka destekli analiz yapan ve tehditleri otonom olarak engelleyen bir siber guvenlik ajani.
+
+HEDEF KITLE
+Siber guvenlik ogrencileri, yazilimcilar ve teknoloji meraklilari.
+
+VIDEONUN TONU
+Teknik ama anlasilir, heyecan verici ve profesyonel. "Yeni nesil bir ajan" hissiyati vermeli.
+
+PROJENIN TEMEL OZELLIKLERI (VURGULANACAK NOKTALAR)
+1. 3 Ajanli Mimari: Tek bir uygulama icinde koordineli calisan 3 farkli birim var (Yonetici, Savunma, Tehdit Analiz).
+2. 4 Farkli AI Yetenegi:
+   - Analist: Saldirilari ayirt eder.
+   - Parser: Loglari okur.
+   - Muhendis: Yeni saldirilar icin Python Regex kodu yazar (Self-Learning).
+   - Asistan: Kullanici ile sohbet eder.
+3. Aktif Savunma (Active Defense): Sadece uyari vermez, kritik saldirilarda IP adresini otomatik olarak banlar (iptables ile).
+4. Modern Arayuz: Terminal ekranina sikisip kalmaz, grafiksel bir arayuzle (Dashboard) verileri sunar.
+
+ISTENEN CIKTI FORMATI (Sadece Metin Olarak)
+
+1. Giris (0:00 - 0:15)
+   - Gorsel Tasvir (Metinle anlat): Ekranda ne gorunmeli?
+   - Seslendirme Metni: Problem tanimi (Siradan log araclarinin yetersizligi).
+
+2. Cozum ve Tanitim (0:15 - 0:45)
+   - Gorsel Tasvir:
+   - Seslendirme Metni: Log Gozcusu'nun tanitimi ve Ajan Mimarisi (3 Ajan, 4 AI vurgusu).
+
+3. Ozellikler ve Demo (0:45 - 1:30)
+   - Gorsel Tasvir: (Arayuzden kesitler, AI'nin kod yazarkenki hali, IP banlama ani vb. tarif et)
+   - Seslendirme Metni: Kendi kendine ogrenme ve sohbet ozelligi.
+
+4. Kapanis (1:30 - Ends)
+   - Gorsel Tasvir:
+   - Seslendirme Metni: Gelecek vizyonu ve kapanis.
+
+Lutfen bu yapiya uygun, sadece metin iceren bir senaryo yaz.

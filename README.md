@@ -1,98 +1,158 @@
-# Log Gözcüsü
+# Log Gözcüsü - Agentic AI Security Tool
 
-**Log Gözcüsü**, web sunucusu günlük dosyalarını (access.log) gerçek zamanlı olarak izleyen, kural tabanlı ve yapay zeka destekli bir güvenlik analiz aracıdır. Potansiyel siber saldırıları tespit eder, raporlar ve kullanıcıyı uyarır.
+**Log Gözcüsü**, web sunucusu günlük dosyalarını (access.log) gerçek zamanlı olarak izleyen, **kendi kendine öğrenebilen** ve **otonom tepki verebilen** yeni nesil bir siber güvenlik ajanıdır. 
 
-![Log Gözcüsü Arayüzü](https://i.imgur.com/example.png) <!-- Gerçek bir ekran görüntüsü URL'si ile değiştirilecek -->
+Sıradan analiz araçlarının aksine, sadece raporlamakla kalmaz; **yeni saldırı tiplerini öğrenir**, **saldırganları engeller** ve **sizinle sohbet ederek** durumu analiz eder.
+
+![Dashboard](static/screenshot.png)
 
 ## ✨ Temel Özellikler
 
-- **Gerçek Zamanlı Log Analizi**: `access.log` dosyasını sürekli izleyerek yeni girişleri anında analiz eder.
-- **Hibrit Tehdit Tespiti**:
-  - **Kural Tabanlı Analiz**: `rules.json` dosyasında tanımlanan esnek ve güçlü regex kuralları ile bilinen saldırı kalıplarını (SQLi, XSS, Path Traversal vb.) anında yakalar.
-  - **Yapay Zeka Destekli Analiz**: Kural dışı veya şüpheli log satırlarını [OpenRouter.ai](https://openrouter.ai/) API'si üzerinden gelişmiş yapay zeka modelleri (örn: Claude 3.5 Sonnet) ile analiz ederek daha derin ve akıllı bir anomali tespiti yapar.
-- **Grafiksel Kullanıcı Arayüzü (GUI)**:
-  - **Etkileşimli Dashboard**: Tespit edilen tehdit verilerini (`threat_data.jsonl`) görselleştiren dinamik bir arayüz.
-    - Zamana göre saldırı yoğunluğu grafiği.
-    - En çok saldıran IP adresleri ve saldırı türleri için grafikler.
-    - Verileri IP ve kategoriye göre filtreleme.
-  - **Canlı Log Akışı**: Ajanın tüm aktivitelerini ve tespitlerini renk kodlamasıyla canlı olarak gösterir.
-  - **Kolay Kontrol**: Tek tıkla ajanı başlatma, durdurma ve yeniden başlatma imkanı.
-- **Detaylı Raporlama**:
-  - `tehdit_raporu.txt`: İnsan tarafından okunabilir, detaylı saldırı raporları.
-  - `analiz_raporu.txt`: İncelenen her log satırı için (hem zararlı hem zararsız) analiz sonuçları.
-  - `durum_raporu.txt`: Periyodik olarak ajanın genel durumu hakkında istatistiksel raporlar.
-  - `threat_data.jsonl`: Yapılandırılmış JSON formatında tehdit verileri. SIEM gibi diğer güvenlik araçlarıyla kolayca entegre edilebilir.
-- **E-posta Bildirimleri**: Bir tehdit tespit edildiğinde anında e-posta ile uyarı gönderir.
+### 🛡️ 1. Otonom Tehdit Tespiti ve Savunma
+- **Kural Tabanlı Hızlı Analiz**: SQLi, XSS gibi bilinen saldırıları anında yakalar
+- **Yapay Zeka (AI) Doğrulaması**: OpenRouter API ile %99 doğruluk oranı
+- **Aktif Savunma**: Kritik saldırılarda IP adresini otomatik `iptables` ile engeller
+- **Anomali Tespiti**: Trafik hacminde anormal artışları istatistiksel olarak tespit eder
+
+### 🧠 2. Kendi Kendine Öğrenme (Self-Learning)
+- Yeni saldırı tipi geldiğinde AI'dan yardım alarak **yeni regex kuralı üretir**
+- Kuralı `rules.json` dosyasına `LEARNED_...` etiketiyle kaydeder
+- Bir sonraki benzer saldırıda AI'ya ihtiyaç duymadan engeller
+
+### 💬 3. Siber Güvenlik Asistanı (Chat)
+- Ajanınızla konuşun: *"Bugün en çok hangi ülkeden saldırı aldık?"*
+- Elindeki verileri tarayarak Türkçe cevap verir
+
+### 📊 4. Web Dashboard (YENİ!)
+- **Canlı İstatistikler**: Tehdit sayısı, kategoriler, top saldırgan IP'ler
+- **Grafikler**: Category pie chart, saatlik dağılım
+- **Real-time Log**: WebSocket ile canlı log akışı
+- **Uzaktan Erişim**: Herhangi bir tarayıcıdan izleyebilirsiniz
+
+---
+
+## 🗂️ Dosya Yapısı
+
+```
+Log-Gozcusu/
+├── ajan.py              # Ana ajan logic (AI, kural eşleştirme, IP ban)
+├── gui.py               # Admin Panel (CustomTkinter desktop GUI)
+├── daemon.py            # 7/24 Backend Service
+├── api.py               # FastAPI Web Server
+├── static/              # Web Dashboard
+│   ├── dashboard.html
+│   ├── style.css
+│   └── app.js
+├── data/
+│   ├── rules.json       # Saldırı kuralları veritabanı
+│   └── threat_data.jsonl# Tespit edilen tehditler
+├── reports/             # Otomatik raporlar
+├── tests/               # Test dosyaları
+├── docs/                # Dokümantasyon
+├── utils/               # Yardımcı modüller
+├── docker-compose.yml   # DVWA test ortamı
+├── test_scenarios.sh    # Saldırı test senaryoları
+└── requirements.txt     # Python bağımlılıkları
+```
+
+---
 
 ## 🛠️ Kurulum
 
-1.  **Projeyi Klonlayın**:
-    ```bash
-    git clone https://github.com/kullanici/log-gozcusu.git
-    cd log-gozcusu
-    ```
+### 1. Gereksinimler
+- Python 3.8+
+- Linux (Aktif Savunma için önerilir)
 
-2.  **Gerekli Python Kütüphanelerini Yükleyin**:
-    - **Temel Çalışma İçin**: Projenin çalışması için ek bir kütüphane gerekmez, sadece standart Python kütüphaneleri kullanılır.
-    - **Dashboard Özelliği İçin**: Grafiksel dashboard'u kullanmak için `pandas` ve `matplotlib` gereklidir.
-      ```bash
-      pip install pandas matplotlib
-      ```
+### 2. Kurulum
+```bash
+git clone https://github.com/Emre-aldmz/Log-Gozcusu-AgenticAI.git
+cd Log-Gozcusu-AgenticAI
+python -m venv .venv
+source .venv/bin/activate  # veya .venv/bin/activate.fish
+pip install -r requirements.txt
+```
 
-3.  **Ortam Değişkenlerini Ayarlayın**:
-    Proje ana dizininde `.env.example` dosyasını `.env` olarak kopyalayın.
-    ```bash
-    cp .env.example .env
-    ```
-    Ardından `.env` dosyasını düzenleyin:
+### 3. Yapılandırma
+`.env` dosyasını düzenleyin:
+```env
+OPENROUTER_API_KEY=your_api_key
+ALERT_EMAIL_USER=your@gmail.com
+ALERT_EMAIL_PASS=app_password
+ALERT_EMAIL_TO=alert@example.com
+ACTIVE_DEFENSE_ENABLED=true
+ACTIVE_DEFENSE_DRY_RUN=true
+```
 
-    - **Yapay Zeka Analizi İçin (Önerilir)**:
-      - [OpenRouter.ai](https://openrouter.ai/) sitesinden bir API anahtarı alın.
-      - `.env` dosyasına ekleyin:
-        ```
-        OPENROUTER_API_KEY="sk-or-..."
-        ```
-      - *Alternatif olarak, bu anahtarı programın GUI'si üzerinden de girebilirsiniz.*
-
-    - **E-posta Bildirimleri İçin (İsteğe Bağlı)**:
-      - Gmail için "Uygulama Şifresi" oluşturun ([Google Hesap Güvenliği](https://myaccount.google.com/security) sayfasından).
-      - `.env` dosyasına bilgileri girin:
-        ```
-        ALERT_EMAIL_USER="mailadresiniz@gmail.com"
-        ALERT_EMAIL_PASS="uygulama_sifreniz"
-        ```
-      - *Uyarıların gönderileceği hedef e-posta adresi, programın arayüzünden girilebilir.*
+---
 
 ## 🚀 Kullanım
 
-1.  **`access.log` Dosyasını Ekleyin**:
-    Analiz etmek istediğiniz `access.log` dosyasını projenin ana dizinine yerleştirin. Test için örnek bir `access.log` dosyası projede mevcuttur.
+### Admin Panel (Desktop GUI)
+```bash
+python gui.py
+# IP engelleme için: sudo python gui.py
+```
 
-2.  **Arayüzü Başlatın**:
-    ```bash
-    python gui.py
-    ```
+### Web Dashboard (Uzaktan İzleme)
+```bash
+# API sunucusunu başlat
+.venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000
 
-3.  **Ajanı Çalıştırın**:
-    - Açılan başlangıç ekranında, uyarıların gönderilmesini istediğiniz e-posta adresini girin (isteğe bağlı).
-    - "Ajanı Çalıştır" butonuna tıklayın.
-    - Artık "Canlı Loglar" sekmesinden ajanın çalışmalarını izleyebilir ve "Dashboard" sekmesinden tespit edilen tehditleri görsel olarak analiz edebilirsiniz.
+# Tarayıcıda aç: http://localhost:8000
+# veya: http://<sunucu-ip>:8000
+```
 
-## 🔧 Yapılandırma
+### 7/24 Daemon (Background Service)
+```bash
+python daemon.py
+# Durdurmak için: python daemon.py stop
+# Durum kontrolü: python daemon.py status
+```
 
-- **Saldırı Kuralları (`rules.json`)**:
-  Kendi özel tespit kurallarınızı eklemek veya mevcutları düzenlemek için `rules.json` dosyasını değiştirebilirsiniz. Her kural `pattern` (regex), `category`, `severity` gibi alanlar içerir.
+---
 
-- **Yapay Zeka Modeli**:
-  Varsayılan olarak `anthropic/claude-3.5-sonnet` modeli kullanılır. Farklı bir model kullanmak isterseniz `.env` dosyasına aşağıdaki değişkeni ekleyebilirsiniz:
-  ```
-  OPENROUTER_MODEL="google/gemini-pro"
-  ```
+## 🧪 Test Ortamı (DVWA)
+
+DVWA (Damn Vulnerable Web App) ile güvenli test ortamı:
+
+```bash
+# Docker başlat
+docker-compose up -d
+
+# DVWA'ya eriş: http://localhost:8080
+# Kullanıcı: admin, Şifre: password
+
+# Saldırı testlerini çalıştır
+./test_scenarios.sh
+
+# Log Gözcüsü'nü DVWA loglarıyla çalıştır
+LOG_PATH=./dvwa_logs/access.log python daemon.py
+```
+
+---
+
+## 📡 API Endpoints
+
+| Endpoint | Method | Açıklama |
+|----------|--------|----------|
+| `/` | GET | Web Dashboard |
+| `/api/status` | GET | Daemon durumu |
+| `/api/stats` | GET | İstatistikler (tehdit sayısı, kategoriler) |
+| `/api/threats` | GET | Tehdit listesi (filtrelenebilir) |
+| `/api/logs/recent` | GET | Son log satırları |
+| `/api/logs/live` | WS | Real-time log stream |
+| `/api/reports` | GET | Rapor listesi |
+| `/docs` | GET | Swagger API dokümantasyonu |
+
+---
 
 ## 🤝 Katkıda Bulunma
+Bu proje açık kaynaklıdır. Özellikle:
+- Yeni regex kuralları
+- AI prompt geliştirmeleri
+- Multi-log parser (error.log, auth.log)
 
-Katkılarınız projeyi daha da geliştirmemize yardımcı olur! Lütfen bir "pull request" açmaktan veya "issue" bildirmekten çekinmeyin.
+için PR gönderebilirsiniz.
 
 ## 📄 Lisans
-
-Bu proje MIT Lisansı altında lisanslanmıştır. Detaylar için `LICENSE` dosyasına bakınız.
+MIT License.

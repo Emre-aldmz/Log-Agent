@@ -1,645 +1,612 @@
-import sys
-import os
-import subprocess
-import threading
-import queue
-from pathlib import Path
-
+#!/usr/bin/env python3
 import customtkinter as ctk
-from tkinter.scrolledtext import ScrolledText # Will be replaced by CTkTextbox
+import tkinter as tk
+import requests
+import json
+import os
+import signal
+import subprocess
+import time
+from datetime import datetime
+from threading import Thread
+from typing import Optional, Dict
+from dotenv import load_dotenv, set_key
 
-# Dashboard için kütüphaneler
-try:
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    LIBS_AVAILABLE = True
-    LIBS_ERROR_MESSAGE = ""
-except ImportError as e:
-    LIBS_AVAILABLE = False
-    LIBS_ERROR_MESSAGE = (
-        f"Gerekli kütüphaneler eksik: {e}\n\n"
-        "Dashboard özelliğini kullanmak için lütfen bu kütüphaneleri yükleyin:\n"
-        "pip install pandas matplotlib"
-    )
+# ==============================================================================
+# CONFIG
+# ==============================================================================
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("blue")
 
-class LogGozcusuGUI:
-    def __init__(self, root: ctk.CTk):
-        self.root = root
-        self.root.title("Log Gözcüsü - Ajan Arayüzü")
-        self.root.geometry("900x600")
-        self.root.minsize(600, 400)
+API_BASE_URL = "http://localhost:8000"
+ENV_FILE = ".env"
 
-        # Ajan çalıştıracağımız process ve thread objeleri
-        self.proc: subprocess.Popen | None = None
-        self.reader_thread: threading.Thread | None = None
-        self.log_queue: "queue.Queue[str]" = queue.Queue()
-
-        # E-posta adresi için bir değişken
-        self.email_to = ctk.StringVar()
-        self.api_key_var = ctk.StringVar()
-
-        # Proje klasörü (ajan.py ile aynı dizin)
-        self.base_dir = Path(__file__).resolve().parent
-
-        # Ekranlar (frame) oluştur
-        self._build_start_screen()
-        self._build_main_screen()
-
-        # Başlangıçta sadece start_screen görünsün
-        self.start_frame.pack(fill="both", expand=True)
-        self.main_frame.pack_forget()
-
-        # Queue'yu periyodik olarak kontrol et
-        self.root.after(100, self._poll_log_queue)
-
-        # Pencere kapanırken ajanı da durdur
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    # -----------------------------
-    # Arayüz kurulum ve stil
-    # -----------------------------
-
-    def _build_start_screen(self):
-        self.start_frame = ctk.CTkFrame(self.root)
-        self.start_frame.pack(fill="both", expand=True)
-
-
-        title = ctk.CTkLabel(
-            self.start_frame,
-            text="Log Gözcüsü",
-            font=ctk.CTkFont(size=24, weight="bold")
-        )
-        title.pack(pady=40, padx=20)
-
-        desc = ctk.CTkLabel(
-            self.start_frame,
-            text=(
-                "Web sunucusu access.log dosyasını izleyen, kural + AI destekli güvenlik ajanı.\n"
-                "Uyarıların gönderileceği e-posta adresini girin ve ajanı başlatın."
-            ),
-            font=ctk.CTkFont(size=12),
-            justify="center"
-        )
-        desc.pack(pady=(10, 20), padx=20)
-
-        # E-posta giriş alanı
-        email_frame = ctk.CTkFrame(self.start_frame, fg_color="transparent")
-        email_frame.pack(pady=10, fill='x', padx=100)
-
-        email_label = ctk.CTkLabel(
-            email_frame,
-            text="Uyarı E-Postası:",
-        )
-        email_label.pack(side="left", padx=(0, 10))
-
-        email_entry = ctk.CTkEntry(
-            email_frame,
-            textvariable=self.email_to,
-            width=250
-        )
-        email_entry.pack(side="left", fill="x", expand=True)
-
-        run_button = ctk.CTkButton(
-            self.start_frame,
-            text="Ajanı Çalıştır",
-            command=self.start_from_start_screen,
-        )
-        run_button.pack(pady=40, ipadx=10, ipady=5)
-
-    def _build_main_screen(self):
-        self.main_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-
-        # Üst bar (Durdur/Başlat butonları ve durum etiketi)
-        top_bar = ctk.CTkFrame(self.main_frame)
-        top_bar.pack(side="top", fill="x", pady=(10, 5), padx=10)
-
-        self.status_label = ctk.CTkLabel(
-            top_bar,
-            text="Durum: Beklemede",
-            font=ctk.CTkFont(size=12, weight="bold")
-        )
-        self.status_label.pack(side="left", padx=10, pady=5)
-        self._update_status_label("Beklemede", "default")
-
-        button_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
-        button_frame.pack(side="right")
-        
-        btn_api = ctk.CTkButton(button_frame, text="API Ayarları", command=self._open_api_window, width=100)
-        btn_api.pack(side="right", padx=(10, 0))
-        
-        btn_stop = ctk.CTkButton(button_frame, text="Durdur", command=self.stop_agent, width=100)
-        btn_stop.pack(side="right", padx=(5, 0))
-
-        btn_restart = ctk.CTkButton(button_frame, text="Yeniden Başlat", command=self.restart_agent, width=100)
-        btn_restart.pack(side="right", padx=5)
-
-        btn_start = ctk.CTkButton(button_frame, text="Başlat", command=self.start_agent, width=100)
-        btn_start.pack(side="right", padx=5)
-
-
-        # Sekmeli yapı (Notebook)
-        self.notebook = ctk.CTkTabview(self.main_frame)
-        self.notebook.pack(fill="both", expand=True, pady=5, padx=10)
-
-        self.notebook.add("Dashboard")
-        self.notebook.add("Canlı Loglar")
-
-        # Log metin alanını Canlı Loglar sekmesine taşı
-        self.log_text = ctk.CTkTextbox(
-            self.notebook.tab("Canlı Loglar"),
-            wrap="word",
-            font=("Consolas", 12),
-            state="disabled",
-            padx=5,
-            pady=5,
-        )
-        self.log_text.pack(fill="both", expand=True)
-
-        # Dashboard içeriğini oluştur
-        self._build_dashboard_tab()
-
-    def _open_api_window(self):
-        api_window = ctk.CTkToplevel(self.root)
-        api_window.title("API Anahtarı Ayarları")
-        api_window.geometry("600x450")
-        api_window.transient(self.root) # Ana pencerenin üzerinde kal
-        
-        main_frame = ctk.CTkFrame(api_window, fg_color="transparent")
-        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-
-        # Açıklama metni
-        tr_text = (
-            "Yapay Zeka (AI) Analizi için API Anahtarı\n\n"
-            "Bu özellik, kural tabanlı tespitlere ek olarak daha derin bir analiz için OpenRouter.ai servisini kullanır.\n\n"
-            "Nasıl Alınır?\n"
-            "1. openrouter.ai adresine gidin ve kayıt olun.\n"
-            "2. Hesabınıza giriş yaptıktan sonra 'Keys' (Anahtarlar) sayfasına gidin.\n"
-            "3. Yeni bir anahtar oluşturun ve aşağıya yapıştırın.\n\n"
-            "Not: Bu özellik isteğe bağlıdır. Anahtar girmezseniz, program sadece kural tabanlı çalışır."
-        )
-        
-        en_text = (
-            "API Key for Artificial Intelligence (AI) Analysis\n\n"
-            "This feature uses the OpenRouter.ai service for deeper analysis in addition to rule-based detection.\n\n"
-            "How to Obtain?\n"
-            "1. Go to openrouter.ai and sign up.\n"
-            "2. After logging into your account, navigate to the 'Keys' page.\n"
-            "3. Create a new key and paste it below.\n\n"
-            "Note: This feature is optional. If you don't enter a key, the program will run in rule-based only mode."
-        )
-
-        # Metinleri sekmeli yapıda göster
-        text_notebook = ctk.CTkTabview(main_frame)
-        text_notebook.pack(fill="both", pady=10, expand=True)
-        
-        text_notebook.add("Türkçe")
-        text_notebook.add("English")
-
-        tr_label = ctk.CTkLabel(text_notebook.tab("Türkçe"), text=tr_text, wraplength=550, justify="left")
-        tr_label.pack(padx=10, pady=10, fill="both", expand=True)
-        
-        en_label = ctk.CTkLabel(text_notebook.tab("English"), text=en_text, wraplength=550, justify="left")
-        en_label.pack(padx=10, pady=10, fill="both", expand=True)
-
-        # API Anahtarı giriş alanı
-        entry_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        entry_frame.pack(fill='x', pady=10)
-        
-        api_label = ctk.CTkLabel(entry_frame, text="OpenRouter API Key:")
-        api_label.pack(side="left", padx=(0, 10))
-        
-        api_entry = ctk.CTkEntry(entry_frame, textvariable=self.api_key_var, width=50, show="*")
-        api_entry.pack(side="left", fill="x", expand=True)
-
-        # Butonlar
-        button_frame_popup = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame_popup.pack(pady=10)
-
-        def save_and_close():
-            self._append_log("[INFO] API anahtarı kaydedildi. Değişikliklerin etkili olması için ajanı yeniden başlatın.\n")
-            api_window.destroy()
-
-        save_button = ctk.CTkButton(button_frame_popup, text="Kaydet ve Kapat", command=save_and_close)
-        save_button.pack()
-
-
-    def _build_dashboard_tab(self):
-        # Dashboard frame'ini notebook'tan al
-        dashboard_tab = self.notebook.tab("Dashboard")
-
-        # Eğer kütüphaneler eksikse, uyarı göster ve çık
-        if not LIBS_AVAILABLE:
-            error_label = ctk.CTkLabel(
-                dashboard_tab,
-                text=LIBS_ERROR_MESSAGE,
-                justify="center",
-                font=ctk.CTkFont(size=12)
-            )
-            error_label.pack(expand=True, fill="both", padx=20, pady=20)
-            return
-        
-        # Ana dataframe'i saklamak için
-        self.df_threats = pd.DataFrame()
-
-        # Dashboard için ana kontrol frame'i
-        controls_frame = ctk.CTkFrame(dashboard_tab)
-        controls_frame.pack(side="top", fill="x", pady=(5, 10))
-
-        btn_refresh = ctk.CTkButton(controls_frame, text="Verileri Yenile", command=self.refresh_dashboard)
-        btn_refresh.pack(side="left", padx=10, pady=10)
-
-        # IP Arama
-        ctk.CTkLabel(controls_frame, text="IP Ara:").pack(side="left", padx=(10, 5))
-        self.ip_search_var = ctk.StringVar()
-        ip_entry = ctk.CTkEntry(controls_frame, textvariable=self.ip_search_var)
-        ip_entry.pack(side="left", padx=5)
-        btn_ip_search = ctk.CTkButton(controls_frame, text="Ara", command=self._apply_filters_and_redraw, width=50)
-        btn_ip_search.pack(side="left", padx=5)
-
-        # Kategori Filtresi
-        ctk.CTkLabel(controls_frame, text="Kategori:").pack(side="left", padx=(10, 5))
-        self.category_filter_var = ctk.StringVar(value="Tümü")
-        # OptionMenu'nün anında güncelleme yapması için trace kullanıyoruz
-        self.category_filter_var.trace_add("write", lambda *_: self._apply_filters_and_redraw())
-        self.category_filter_menu = ctk.CTkOptionMenu(
-            controls_frame, 
-            variable=self.category_filter_var, 
-            values=["Tümü"]
-        )
-        self.category_filter_menu.pack(side="left", padx=5)
-
-
-        # Grafiklerin yer alacağı alan
-        self.charts_frame = ctk.CTkFrame(dashboard_tab, fg_color="transparent")
-        self.charts_frame.pack(side="bottom", fill="both", expand=True)
+class ApiClient:
+    """Log Gözcüsü API ile iletişim kuran istemci sınıfı."""
     
-        # Grafik alanlarını oluştur (Dikey olarak alt alta)
-        self.chart1_frame = ctk.CTkFrame(self.charts_frame)
-        self.chart1_frame.pack(side="top", fill="both", expand=True, pady=(0,5))
-        
-        self.chart2_frame = ctk.CTkFrame(self.charts_frame)
-        self.chart2_frame.pack(side="top", fill="both", expand=True, pady=5)
-        
-        self.chart3_frame = ctk.CTkFrame(self.charts_frame)
-        self.chart3_frame.pack(side="top", fill="both", expand=True, pady=(5,0))
+    @staticmethod
+    def get_status() -> Optional[Dict]:
+        try:
+            response = requests.get(f"{API_BASE_URL}/api/status", timeout=2)
+            if response.status_code == 200:
+                return response.json()
+        except:
+            return None
+        return None
 
-    def _clear_frame(self, frame: ctk.CTkFrame):
-        for widget in frame.winfo_children():
+    @staticmethod
+    def get_recent_logs(limit=50) -> list:
+        try:
+            response = requests.get(f"{API_BASE_URL}/api/logs/recent?limit={limit}", timeout=2)
+            if response.status_code == 200:
+                return response.json().get("logs", [])
+        except:
+            return []
+        return []
+
+    @staticmethod
+    def get_threats(limit=20) -> list:
+        try:
+            response = requests.get(f"{API_BASE_URL}/api/threats?limit={limit}", timeout=2)
+            if response.status_code == 200:
+                return response.json().get("threats", [])
+        except:
+            return []
+        return []
+
+    @staticmethod
+    def send_feedback(index: int, feedback: str) -> bool:
+        try:
+            url = f"{API_BASE_URL}/api/threats/{index}/feedback?feedback={feedback}"
+            response = requests.post(url, timeout=2)
+            return response.status_code == 200
+        except:
+            return False
+
+    @staticmethod
+    def get_system_logs(limit=50) -> list:
+        try:
+            response = requests.get(f"{API_BASE_URL}/api/logs/system?limit={limit}", timeout=2)
+            if response.status_code == 200:
+                return response.json().get("logs", [])
+        except:
+            return []
+        return []
+
+    @staticmethod
+    def block_ip(ip: str) -> bool:
+        try:
+            response = requests.post(f"{API_BASE_URL}/api/threats/block", json={"ip": ip}, timeout=5)
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("status") == "blocked"
+            return False
+        except:
+            return False
+
+    @staticmethod
+    def ask_ai(message: str, context: Optional[str] = None) -> str:
+        try:
+            payload = {"message": message, "context": context}
+            response = requests.post(f"{API_BASE_URL}/api/chat", json=payload, timeout=30)
+            if response.status_code == 200:
+                return response.json().get("response", "AI'dan cevap alınamadı.")
+            return f"Hata: {response.status_code} - {response.text}"
+        except Exception as e:
+            return f"Bağlantı hatası: {e}"
+
+class AdminPanel(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        # Window Setup
+        self.title("Log Gözcüsü - Yönetim Paneli")
+        self.geometry("1100x700")
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # Assets & State
+        self.daemon_pid = self._find_daemon_pid()
+        self.api_online = False
+        self.running = True
+        
+        # Load Env
+        load_dotenv(ENV_FILE)
+
+        # Sidebar
+        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(6, weight=1)
+
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="🛡️ Log Gözcüsü", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        
+        self.subtitle_label = ctk.CTkLabel(self.sidebar_frame, text="Admin Control Panel", font=ctk.CTkFont(size=12))
+        self.subtitle_label.grid(row=1, column=0, padx=20, pady=(0, 20))
+
+        # Navigation Buttons
+        self.btn_status = self._create_nav_btn("Durum & Kontrol", self.show_status_tab, 2)
+        self.btn_logs = self._create_nav_btn("Sistem Kayıtları", self.show_logs_tab, 3)
+        self.btn_threats = self._create_nav_btn("Tehdit Yönetimi", self.show_threats_tab, 4)
+        self.btn_settings = self._create_nav_btn("⚙️ Ayarlar", self.show_settings_tab, 5)
+        
+        # Bottom Actions
+        self.appearance_mode_label = ctk.CTkLabel(self.sidebar_frame, text="Tema:", anchor="w")
+        self.appearance_mode_label.grid(row=7, column=0, padx=20, pady=(10, 0))
+        self.appearance_mode_optionemenu = ctk.CTkOptionMenu(self.sidebar_frame, values=["System", "Dark", "Light"],
+                                                               command=self.change_appearance_mode_event)
+        self.appearance_mode_optionemenu.grid(row=8, column=0, padx=20, pady=(10, 20))
+
+        # Main Area
+        self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.main_frame.grid_rowconfigure(0, weight=1)
+        self.main_frame.grid_columnconfigure(0, weight=1)
+
+        # Tabs
+        self.frames = {}
+        for F in (StatusTab, LogsTab, ThreatsTab, SettingsTab):
+            page_name = F.__name__
+            frame = F(parent=self.main_frame, controller=self)
+            self.frames[page_name] = frame
+            frame.grid(row=0, column=0, sticky="nsew")
+
+        # Start with Status Tab
+        self.show_status_tab()
+
+        # Background Thread for connectivity check
+        Thread(target=self._monitor_system, daemon=True).start()
+
+    def _create_nav_btn(self, text, command, row):
+        btn = ctk.CTkButton(self.sidebar_frame, text=text, command=command, fg_color="transparent", 
+                            text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"), anchor="w")
+        btn.grid(row=row, column=0, padx=20, pady=5, sticky="ew")
+        return btn
+
+    def show_frame(self, page_name):
+        frame = self.frames[page_name]
+        frame.tkraise()
+        if hasattr(frame, "refresh"):
+            frame.refresh()
+
+    def show_status_tab(self): self.show_frame("StatusTab")
+    def show_logs_tab(self): self.show_frame("LogsTab")
+    def show_threats_tab(self): self.show_frame("ThreatsTab")
+    def show_settings_tab(self): self.show_frame("SettingsTab")
+
+    def change_appearance_mode_event(self, new_appearance_mode: str):
+        ctk.set_appearance_mode(new_appearance_mode)
+
+    def _find_daemon_pid(self):
+        try:
+            result = subprocess.check_output(["pgrep", "-f", "daemon.py"])
+            pids = result.decode().strip().split("\n")
+            return int(pids[0]) if pids else None
+        except:
+            return None
+
+    def _monitor_system(self):
+        while self.running:
+            self.daemon_pid = self._find_daemon_pid()
+            status = ApiClient.get_status()
+            self.api_online = status is not None and status.get("api_running", False)
+            status_tab = self.frames["StatusTab"]
+            status_tab.update_indicators(self.daemon_pid is not None, self.api_online, status)
+            time.sleep(2)
+
+
+class StatusTab(ctk.CTkFrame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+
+        # Header
+        self.label_title = ctk.CTkLabel(self, text="Sistem Durumu", font=ctk.CTkFont(size=24, weight="bold"))
+        self.label_title.grid(row=0, column=0, columnspan=2, padx=20, pady=(0, 20), sticky="w")
+
+        # Daemon Card
+        self.frame_daemon = self._create_status_card(1, "Arka Plan Servisi (Daemon)", "Kontrol ediliyor...")
+        self.btn_daemon_start = ctk.CTkButton(self.frame_daemon, text="Başlat", command=self.start_daemon, fg_color="green")
+        self.btn_daemon_start.grid(row=2, column=0, padx=10, pady=10)
+        self.btn_daemon_stop = ctk.CTkButton(self.frame_daemon, text="Durdur", command=self.stop_daemon, fg_color="red")
+        self.btn_daemon_stop.grid(row=2, column=1, padx=10, pady=10)
+
+        # API Card
+        self.frame_api = self._create_status_card(2, "Web API & Dashboard", "Kontrol ediliyor...")
+        self.lbl_api_url = ctk.CTkLabel(self.frame_api, text="URL: http://localhost:8000")
+        self.lbl_api_url.grid(row=2, column=0, columnspan=2, pady=5)
+        
+        # Threat Counter (Big)
+        self.lbl_threat_count = ctk.CTkLabel(self.frame_api, text="Toplam Tehdit: 0", font=ctk.CTkFont(size=18, weight="bold"), text_color="orange")
+        self.lbl_threat_count.grid(row=3, column=0, columnspan=2, pady=5)
+        
+        self.btn_open_web = ctk.CTkButton(self.frame_api, text="Tarayıcıda Aç", command=lambda: subprocess.Popen(["xdg-open", "http://localhost:8000"]))
+        self.btn_open_web.grid(row=4, column=0, columnspan=2, pady=10)
+
+        # Info
+        self.textbox_log = ctk.CTkTextbox(self, width=400, height=150, state="disabled")
+        self.textbox_log.grid(row=3, column=0, columnspan=2, padx=20, pady=20, sticky="nsew")
+        self.log("Admin Paneli başlatıldı.")
+
+    def _create_status_card(self, row, title, status):
+        frame = ctk.CTkFrame(self)
+        frame.grid(row=row, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
+        
+        lbl_title = ctk.CTkLabel(frame, text=title, font=ctk.CTkFont(size=16, weight="bold"))
+        lbl_title.grid(row=0, column=0, columnspan=2, pady=(10, 5))
+        
+        lbl_status = ctk.CTkLabel(frame, text=status, font=ctk.CTkFont(size=14))
+        lbl_status.grid(row=1, column=0, columnspan=2, pady=(0, 10))
+        
+        frame.status_label = lbl_status
+        return frame
+
+    def update_indicators(self, daemon_running, api_running, api_data):
+        # Daemon
+        daemon_lbl = self.frame_daemon.status_label
+        if daemon_running:
+            daemon_lbl.configure(text="✅ ÇALIŞIYOR", text_color="green")
+            self.btn_daemon_start.configure(state="disabled")
+            self.btn_daemon_stop.configure(state="normal")
+        else:
+            daemon_lbl.configure(text="❌ DURDU", text_color="red")
+            self.btn_daemon_start.configure(state="normal")
+            self.btn_daemon_stop.configure(state="disabled")
+            
+        # API
+        api_lbl = self.frame_api.status_label
+        if api_running:
+            api_lbl.configure(text="✅ ONLINE", text_color="green")
+            if api_data:
+                count = api_data.get('total_threats', 0)
+                self.lbl_threat_count.configure(text=f"Toplam Tehdit: {count}")
+        else:
+            api_lbl.configure(text="❌ OFFLINE", text_color="red")
+            self.lbl_threat_count.configure(text="Toplam Tehdit: -")
+
+    def start_daemon(self):
+        try:
+            subprocess.Popen([".venv/bin/python", "daemon.py"], start_new_session=True)
+            self.log("Daemon başlatma komutu verildi...")
+            time.sleep(1)
+        except Exception as e:
+            self.log(f"Başlatma hatası: {e}")
+
+    def stop_daemon(self):
+        if self.controller.daemon_pid:
+            try:
+                os.kill(self.controller.daemon_pid, signal.SIGTERM)
+                self.log(f"Daemon durduruldu (PID: {self.controller.daemon_pid})")
+            except Exception as e:
+                self.log(f"Durdurma hatası: {e}")
+        else:
+            self.log("Durdurulacak işlem bulunamadı.")
+
+    def log(self, text):
+        self.textbox_log.configure(state="normal")
+        self.textbox_log.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n")
+        self.textbox_log.see("end")
+        self.textbox_log.configure(state="disabled")
+
+
+class LogsTab(ctk.CTkFrame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+        
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
+        
+        ctk.CTkLabel(header_frame, text="Sistem/Daemon Kayıtları", font=ctk.CTkFont(size=24, weight="bold")).pack(side="left")
+        
+        self.auto_refresh = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(header_frame, text="Otomatik Yenile (3sn)", variable=self.auto_refresh).pack(side="right", padx=10)
+        ctk.CTkButton(header_frame, text="Yenile", command=self.refresh).pack(side="right")
+
+        self.textbox = ctk.CTkTextbox(self, font=("Courier", 12), state="disabled")
+        self.textbox.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="nsew")
+        
+        # Right Click Menu
+        self.context_menu = tk.Menu(self, tearoff=0)
+        self.context_menu.add_command(label="🤖 AI ile Açıkla (Explain)", command=self.explain_selection)
+        
+        self.textbox.bind("<Button-3>", self.show_context_menu)
+
+        
+        # Start auto-refresh loop
+        self.after(3000, self._auto_refresh_loop)
+
+    def _auto_refresh_loop(self):
+        if self.auto_refresh.get() and self.winfo_exists():
+            self.refresh()
+        self.after(3000, self._auto_refresh_loop)
+
+    def refresh(self):
+        if not self.winfo_exists(): return
+        
+        # Sadece System Logs çek
+        system_logs = ApiClient.get_system_logs(limit=100)
+        
+        # Tarihe göre sırala (varsa)
+        def get_sort_key(entry):
+            ts = entry.get('timestamp')
+            return ts if ts else "0"
+            
+        system_logs.sort(key=get_sort_key)
+        
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
+        
+        if not system_logs:
+            self.textbox.insert("end", "-- Sistem kaydı bulunamadı --\n")
+        else:
+            for entry in system_logs:
+                line = entry.get("content", "")
+                ts = entry.get("timestamp", "").split("T")[-1][:8] if entry.get("timestamp") else ""
+                level = entry.get('level', 'INFO').upper()
+                
+                self.textbox.insert("end", f"[{ts}] [{level}] {line}\n")
+                self.textbox.insert("end", "-" * 100 + "\n") # Ayırıcı Çizgi
+        
+        self.textbox.configure(state="disabled")
+
+    def show_context_menu(self, event):
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.context_menu.grab_release()
+
+    def explain_selection(self):
+        try:
+            # Seçili metni al
+            text = self.textbox.selection_get()
+            if not text.strip():
+                return
+        except:
+            return
+
+        # Pop-up aç ve bekle
+        popup = ExplanationPopup(self, text)
+
+
+class ThreatsTab(ctk.CTkFrame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
+        
+        ctk.CTkLabel(header_frame, text="Tehdit Yönetimi", font=ctk.CTkFont(size=24, weight="bold")).pack(side="left")
+        ctk.CTkButton(header_frame, text="Yenile", command=self.refresh).pack(side="right")
+
+        self.scroll_frame = ctk.CTkScrollableFrame(self)
+        self.scroll_frame.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="nsew")
+
+    def refresh(self):
+        for widget in self.scroll_frame.winfo_children():
             widget.destroy()
 
-    def refresh_dashboard(self):
-        """Ana veri dosyasını yeniden okur ve filtreleri güncelleyip çizim yapar."""
-        threat_data_path = self.base_dir / "threat_data.jsonl"
-        
-        for frame in [self.chart1_frame, self.chart2_frame, self.chart3_frame]:
-            self._clear_frame(frame)
-
-        if not threat_data_path.exists():
-            error_label = ctk.CTkLabel(self.chart1_frame, text="Veri dosyası (threat_data.jsonl) bulunamadı.")
-            error_label.pack(pady=20)
+        threats = ApiClient.get_threats(limit=50)
+        if not threats:
+            ctk.CTkLabel(self.scroll_frame, text="Henüz tehdit tespit edilmedi.").pack(pady=20)
             return
 
-        try:
-            self.df_threats = pd.read_json(threat_data_path, lines=True)
-            if self.df_threats.empty:
-                error_label = ctk.CTkLabel(self.chart1_frame, text="Tehdit verisi bulunamadı.")
-                error_label.pack(pady=20)
-                return
-        except Exception as e:
-            self.df_threats = pd.DataFrame()
-            error_label = ctk.CTkLabel(self.chart1_frame, text=f"Veri okuma hatası:\n{e}")
-            error_label.pack(pady=20)
-            return
+        for idx, threat in enumerate(threats):
+            self._create_threat_card(idx, threat)
+
+    def _create_threat_card(self, index, threat):
+        card = ctk.CTkFrame(self.scroll_frame)
+        card.pack(fill="x", pady=5, padx=5)
         
-        # Kategori filtresi menüsünü güncelle
-        categories = ["Tümü"] + sorted(self.df_threats['category'].unique().tolist())
-        self.category_filter_menu.configure(values=categories)
+        # Extract data
+        timestamp = threat.get('timestamp', '-')
+        category = threat.get('category', 'Unknown')
+        rule_id = threat.get('rule_id', '-')
+        severity = threat.get('severity', 'UNK')
+        ip = threat.get('ip', '-')
+        log_line = threat.get('log_entry', '')
         
-        # Filtreleri uygula ve çiz
-        self._apply_filters_and_redraw()
-
-    def _apply_filters_and_redraw(self):
-        """Mevcut filtreleri DataFrame'e uygular ve grafikleri yeniden çizer."""
-        if not hasattr(self, 'df_threats') or self.df_threats.empty:
-            return
-
-        for frame in [self.chart1_frame, self.chart2_frame, self.chart3_frame]:
-            self._clear_frame(frame)
-
-        filtered_df = self.df_threats.copy()
-
-        # IP filtresi
-        ip_search = self.ip_search_var.get()
-        if ip_search:
-            filtered_df = filtered_df[filtered_df['ip'].str.contains(ip_search, na=False)]
-
-        # Kategori filtresi
-        category_filter = self.category_filter_var.get()
-        if category_filter != "Tümü":
-            filtered_df = filtered_df[filtered_df['category'] == category_filter]
+        # Robust Parsing
+        method = "-"
+        resource = "-"
+        query = "-"
+        status = "-"
+        ua = "-"
         
-        if filtered_df.empty:
-            error_label = ctk.CTkLabel(self.chart1_frame, text="Filtre ile eşleşen veri bulunamadı.")
-            error_label.pack(pady=20)
-            return
-
-        # Grafik oluşturma fonksiyonlarını çağır
-        self._draw_threats_by_time_chart(filtered_df, self.chart1_frame)
-        self._draw_top_ips_chart(filtered_df, self.chart2_frame)
-        self._draw_attack_types_chart(filtered_df, self.chart3_frame)
-    
-    def _draw_attack_types_chart(self, df: "pd.DataFrame", parent_frame: ctk.CTkFrame):
-        """Saldırı türlerini gösteren pasta grafik çizer."""
-        attack_types = df['category'].value_counts()
-        
-        try:
-            # Tema renklerini doğru şekilde al
-            bg_color_tuple = parent_frame.cget("fg_color")
-            current_mode = ctk.get_appearance_mode()
-            bg_color = bg_color_tuple[1] if current_mode == "Dark" else bg_color_tuple[0]
+        # Try split by quotes first: IP - - [Date] "Request" Status Size "Referer" "UA"
+        parts = log_line.split('"')
+        if len(parts) >= 6:
+            # Request Part (Method URL Protocol)
+            req_parts = parts[1].split()
+            if len(req_parts) >= 2:
+                method = req_parts[0]
+                full_url = req_parts[1]
+                if '?' in full_url:
+                    try:
+                        resource, query = full_url.split('?', 1)
+                    except:
+                        resource = full_url
+                else:
+                    resource = full_url
             
-            text_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-        except (KeyError, IndexError):
-            # Tema okuma başarısız olursa varsayılan renklere dön
-            bg_color = "white"
-            text_color = "black"
-
-        
-        fig, ax = plt.subplots(figsize=(5, 4), dpi=100)
-        fig.patch.set_facecolor(bg_color)
-        
-        wedges, texts, autotexts = ax.pie(
-            attack_types, 
-            labels=attack_types.index,
-            autopct='%1.1f%%',
-            startangle=90,
-            pctdistance=0.85,
-            textprops={'color': text_color}
-        )
-        
-        for autotext in autotexts:
-            autotext.set_color("white")
-            autotext.set_fontweight('bold')
-
-        centre_circle = plt.Circle((0,0),0.70,fc=bg_color)
-        fig.gca().add_artist(centre_circle)
-
-        ax.axis('equal')
-        ax.set_title("Saldırı Türü Dağılımı", color=text_color, pad=20)
-        
-        plt.tight_layout()
-
-        canvas = FigureCanvasTkAgg(fig, master=parent_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
-
-    def _draw_top_ips_chart(self, df: "pd.DataFrame", parent_frame: ctk.CTkFrame):
-        """En çok saldıran IP'leri gösteren çubuk grafik çizer."""
-        top_ips = df['ip'].value_counts().nlargest(10).sort_values()
-
-        try:
-            # Tema renklerini doğru şekilde al
-            bg_color_tuple = parent_frame.cget("fg_color")
-            current_mode = ctk.get_appearance_mode()
-            bg_color = bg_color_tuple[1] if current_mode == "Dark" else bg_color_tuple[0]
+            # Status Part
+            try:
+                status = parts[2].strip().split()[0]
+            except: pass
             
-            text_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-            accent_color = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
-        except (KeyError, IndexError):
-             # Tema okuma başarısız olursa varsayılan renklere dön
-            bg_color = "white"
-            text_color = "black"
-            accent_color = "#3B8ED0" # Default CTk blue
-        
-        fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
-        fig.patch.set_facecolor(bg_color)
-        ax.set_facecolor(bg_color)
+            # User Agent
+            ua = parts[5]
 
-        ax.tick_params(axis='x', colors=text_color)
-        ax.tick_params(axis='y', colors=text_color)
-        for spine in ax.spines.values():
-            spine.set_edgecolor(text_color)
-
-        ax.set_title("Top 10 Saldırgan IP Adresi", color=text_color)
-        
-        top_ips.plot(kind='barh', ax=ax, color=accent_color)
-        ax.set_xlabel("Saldırı Sayısı", color=text_color)
-        ax.set_ylabel("IP Adresi", color=text_color)
-        
-        plt.tight_layout()
-
-        canvas = FigureCanvasTkAgg(fig, master=parent_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
-
-    def _draw_threats_by_time_chart(self, df: "pd.DataFrame", parent_frame: ctk.CTkFrame):
-        """Günün saatine göre tehdit sayısını gösteren çizgi grafik çizer."""
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        threats_by_hour_of_day = df.groupby(df['timestamp'].dt.hour).size().reindex(range(24), fill_value=0)
-
+        # Format Text
         try:
-            # Tema renklerini doğru şekilde al
-            bg_color_tuple = parent_frame.cget("fg_color")
-            current_mode = ctk.get_appearance_mode()
-            bg_color = bg_color_tuple[1] if current_mode == "Dark" else bg_color_tuple[0]
-            
-            text_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-            accent_color_tuple = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
-            accent_color = accent_color_tuple[1] if current_mode == "Dark" else accent_color_tuple[0]
-        except (KeyError, IndexError):
-            # Tema okuma başarısız olursa varsayılan renklere dön
-            bg_color = "white"
-            text_color = "black"
-            accent_color = "#3B8ED0" # Default CTk blue
-        
-        fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
-        fig.patch.set_facecolor(bg_color)
-        ax.set_facecolor(bg_color)
+             # Clean up query string decoding if needed
+             import urllib.parse
+             query = urllib.parse.unquote_plus(query)
+        except: pass
 
-        ax.tick_params(axis='x', colors=text_color, rotation=0)
-        ax.tick_params(axis='y', colors=text_color)
-        for spine in ax.spines.values():
-            spine.set_edgecolor(text_color)
-        
-        ax.set_title("Günün Saatlerine Göre Saldırı Yoğunluğu", color=text_color)
-        ax.set_ylabel("Toplam Tehdit Sayısı", color=text_color)
-        ax.set_xlabel("Günün Saati", color=text_color)
-        ax.set_xticks(range(0, 24, 2))
-        
-        threats_by_hour_of_day.plot(kind='line', ax=ax, color=accent_color, marker='o', markersize=4)
-        
-        fig.tight_layout()
-
-        canvas = FigureCanvasTkAgg(fig, master=parent_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
-
-
-    def _update_status_label(self, status_text: str, state: str):
-        color_map = {
-            "running": "#2CC985", # Yeşil
-            "stopped": "#E64444", # Kırmızı
-            "error": "#E64444",
-            "default": ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-        }
-        self.status_label.configure(
-            text=f"Durum: {status_text}",
-            text_color=color_map.get(state, color_map["default"])
+        report_text = (
+            "--------------------------------------------------------------------------------\n"
+            f"[{timestamp}] UYARI: {category} tespit edildi! (kural={rule_id}, seviye={severity})\n"
+            f"Açıklama : {category} saldırı kalıbı.\n"
+            f"IP       : {ip}\n"
+            f"Method   : {method}\n"
+            f"Kaynak   : {resource}\n"
+            f"Sorgu    : {query}\n"
+            f"Status   : {status}\n"
+            f"User-Ag. : {ua}\n"
+            f"Log Satırı: {log_line}\n"
+            "--------------------------------------------------------------------------------"
         )
 
-    def start_from_start_screen(self):
-        self.main_frame.pack(fill="both", expand=True)
-        self.start_frame.pack_forget()
-        self.start_agent()
-
-    def start_agent(self):
-        if self.proc is not None and self.proc.poll() is None:
-            self._append_log("[INFO] Ajan zaten çalışıyor.\n")
-            return
-
-        # Sanal ortamın python'unu kullan
-        python_executable = sys.executable
-        if ".venv" in python_executable:
-             # Eğer zaten venv'de çalışıyorsa direkt kullan
-             pass
-        else:
-            # Değilse, proje dizinindeki venv'i hedefle
-            venv_python_path = self.base_dir / ".venv" / "bin" / "python"
-            if venv_python_path.exists():
-                python_executable = str(venv_python_path)
-            else:
-                # venv bulunamazsa sistemdeki default'u kullanmayı dene
-                pass
-
-
-        ajan_path = self.base_dir / "ajan.py"
-        if not ajan_path.exists():
-            self._append_log("[HATA] ajan.py bu klasörde bulunamadı.\n")
-            self._update_status_label("ajan.py bulunamadı", "error")
-            return
-
-        env = os.environ.copy()
+        # Display Text
+        text_widget = ctk.CTkTextbox(card, height=180, font=("Courier", 11), wrap="none")
+        text_widget.pack(fill="x", padx=5, pady=5)
+        text_widget.insert("1.0", report_text)
+        text_widget.configure(state="disabled")
         
-        user_email = self.email_to.get()
-        if user_email:
-            env["ALERT_EMAIL_TO"] = user_email
-            self._append_log(f"[INFO] Uyarı e-postası şu adrese ayarlandı: {user_email}\n")
+        # Actions
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=5, pady=5)
+        
+        fb = threat.get("feedback")
+        if fb:
+            ctk.CTkLabel(btn_frame, text=f"Geri Bildirim: {fb}", text_color="orange").pack(side="left")
         else:
-            self._append_log("[UYARI] E-posta adresi girilmedi. Mail gönderimi devre dışı.\n")
+            ctk.CTkButton(btn_frame, text="✅ Doğru Tespit", width=120, height=24, fg_color="green",
+                          command=lambda i=index: self.send_fb(i, "true_positive")).pack(side="left", padx=5)
+            ctk.CTkButton(btn_frame, text="⚠️ Yanlış Alarm", width=120, height=24, fg_color="red",
+                          command=lambda i=index: self.send_fb(i, "false_positive")).pack(side="left", padx=5)
+            
+            # Manuel Engelleme Butonu
+            ctk.CTkButton(btn_frame, text="🚫 Engelle", width=120, height=24, fg_color="darkred",
+                          command=lambda t=threat: self.block_threat(t)).pack(side="left", padx=5)
 
-        gui_api_key = self.api_key_var.get()
-        if gui_api_key:
-            env["LOG_GOZCUSU_GUI_API_KEY"] = gui_api_key
-            self._append_log("[INFO] GUI üzerinden yeni bir API anahtarı ayarlandı.\n")
+    def send_fb(self, index, feedback):
+        if ApiClient.send_feedback(index, feedback):
+            self.refresh()
+            
+    def block_threat(self, threat):
+        """Tehdit kaynağını engellemek için API çağrısı."""
+        ip = threat.get('ip')
+        if not ip or ip == "-":
+            print("[GUI] Geçersiz IP, engellenemez.")
+            return
+
+        if ApiClient.block_ip(ip):
+            print(f"[GUI] {ip} başarıyla engellendi.")
+            # Belki butonu disable edebiliriz ama refresh olunca zaten yeniden çiziliyor
+            # Basit bir pop-up veya renk değişimi yapılabilir ama şimdilik konsol/log yeterli.
         else:
-            self._append_log("[INFO] GUI'den API anahtarı girilmedi, sistemdeki anahtar kullanılacak (varsa).\n")
+            print(f"[GUI] {ip} engellenemedi!")
 
 
+class SettingsTab(ctk.CTkFrame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1) 
+        
+        # Header
+        ctk.CTkLabel(self, text="Ayarlar", font=ctk.CTkFont(size=24, weight="bold")).grid(row=0, column=0, columnspan=2, padx=20, pady=20, sticky="w")
+
+        # --- AI Settings ---
+        ai_frame = ctk.CTkFrame(self)
+        ai_frame.grid(row=1, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
+        
+        ctk.CTkLabel(ai_frame, text="Yapay Zeka (AI) Ayarları", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=10)
+        
+        self.entry_ai_key = self._create_input(ai_frame, "OpenRouter API Key:", os.getenv("OPENROUTER_API_KEY", ""))
+
+        # --- Email Settings ---
+        email_frame = ctk.CTkFrame(self)
+        email_frame.grid(row=2, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
+        
+        ctk.CTkLabel(email_frame, text="E-posta Bildirim Ayarları (SMTP)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=10)
+        
+        self.entry_smtp_server = self._create_input(email_frame, "SMTP Sunucusu:", os.getenv("SMTP_SERVER", "smtp.gmail.com"))
+        self.entry_smtp_port = self._create_input(email_frame, "SMTP Port:", os.getenv("SMTP_PORT", "587"))
+        self.entry_sender = self._create_input(email_frame, "Gönderen E-posta:", os.getenv("SENDER_EMAIL", ""))
+        self.entry_password = self._create_input(email_frame, "Gönderen Şifresi:", os.getenv("SENDER_PASSWORD", ""), show="*")
+        self.entry_receiver = self._create_input(email_frame, "Alıcı E-posta:", os.getenv("RECEIVER_EMAIL", ""))
+
+        # Actions
+        btn_save = ctk.CTkButton(self, text="💾 Ayarları Kaydet", command=self.save_settings, width=200, height=40)
+        btn_save.grid(row=3, column=0, columnspan=2, pady=30)
+        
+        self.lbl_msg = ctk.CTkLabel(self, text="", text_color="green")
+        self.lbl_msg.grid(row=4, column=0, columnspan=2)
+
+    def _create_input(self, parent, label_text, default_val, show=None):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkLabel(frame, text=label_text, width=150, anchor="w").pack(side="left")
+        entry = ctk.CTkEntry(frame, width=300, show=show)
+        entry.pack(side="left", padx=10)
+        if default_val:
+            entry.insert(0, default_val)
+        return entry
+
+    def save_settings(self):
         try:
-            self.proc = subprocess.Popen(
-                [python_executable, "-u", str(ajan_path)],
-                cwd=self.base_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                env=env
-            )
+            # AI
+            set_key(ENV_FILE, "OPENROUTER_API_KEY", self.entry_ai_key.get())
+            
+            # Email
+            set_key(ENV_FILE, "SMTP_SERVER", self.entry_smtp_server.get())
+            set_key(ENV_FILE, "SMTP_PORT", self.entry_smtp_port.get())
+            set_key(ENV_FILE, "SENDER_EMAIL", self.entry_sender.get())
+            set_key(ENV_FILE, "SENDER_PASSWORD", self.entry_password.get())
+            set_key(ENV_FILE, "RECEIVER_EMAIL", self.entry_receiver.get())
+            
+            self.lbl_msg.configure(text="Ayarlar başarıyla kaydedildi! (Yeniden başlatma gerekebilir)", text_color="green")
         except Exception as e:
-            self._append_log(f"[HATA] Ajan başlatılamadı: {e}\n")
-            self._update_status_label("Başlatma hatası", "error")
-            self.proc = None
-            return
-
-        self._update_status_label("Çalışıyor", "running")
-        self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
-        self.reader_thread.start()
-        self._append_log("[INFO] Ajan başlatıldı.\n")
-
-    def stop_agent(self):
-        if self.proc is None or self.proc.poll() is not None:
-            self._append_log("[INFO] Ajan zaten çalışmıyor.\n")
-            self._update_status_label("Durduruldu", "stopped")
-            return
-
-        try:
-            self.proc.terminate()
-            self.proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-            self._append_log("[UYARI] Ajan düzgün sonlandırılamadı, zorla kapatıldı.\n")
-        except Exception as e:
-            self._append_log(f"[UYARI] Ajan sonlandırılırken hata: {e}\n")
-
-        self.proc = None
-        self._update_status_label("Durduruldu", "stopped")
-        self._append_log("[INFO] Ajan durduruldu.\n")
-
-    def restart_agent(self):
-        self._append_log("\n" + "="*20 + " AJAN YENİDEN BAŞLATILIYOR " + "="*20 + "\n\n")
-        self.stop_agent()
-        self.root.after(200, self.start_agent)
-
-    def _reader_loop(self):
-        if self.proc is None or self.proc.stdout is None:
-            return
-
-        for line in iter(self.proc.stdout.readline, ''):
-            self.log_queue.put(line)
-
-        self.proc.stdout.close()
-        self.log_queue.put("[INFO] Ajan süreci sonlandı.\n")
-        self.root.after(0, self._update_status_label, "Süreç sonlandı", "stopped")
-
-    def _poll_log_queue(self):
-        try:
-            while True:
-                line = self.log_queue.get_nowait()
-                self._append_log(line)
-        except queue.Empty:
-            pass
-        self.root.after(100, self._poll_log_queue)
-
-    def _append_log(self, text: str):
-        self.log_text.tag_config("attack", foreground="#E64444")
-        self.log_text.tag_config("warning", foreground="#FFA500")
-        self.log_text.tag_config("error", foreground="#E64444")
-        self.log_text.tag_config("info", foreground="#2CC985")
-
-        tag = None
-        if "!" in text:
-            tag = "attack"
-        elif "[UYARI]" in text:
-            tag = "warning"
-        elif "[HATA]" in text:
-            tag = "error"
-        elif "[INFO]" in text or "[LOG GÖZCÜSÜ]" in text:
-            tag = "info"
+            self.lbl_msg.configure(text=f"Hata: {e}", text_color="red")
 
 
-        self.log_text.configure(state="normal")
-        if tag:
-            self.log_text.insert("end", text, tag)
-        else:
-            self.log_text.insert("end", text)
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
-
-    def on_close(self):
-        self.stop_agent()
-        self.root.destroy()
 
 
-def main():
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("blue")
-    
-    root = ctk.CTk()
-    app = LogGozcusuGUI(root)
-    root.mainloop()
+class ExplanationPopup(ctk.CTkToplevel):
+    def __init__(self, parent, log_text):
+        super().__init__(parent)
+        self.title("AI Log Analizi")
+        self.geometry("600x400")
+        self.log_text = log_text
+        
+        # UI
+        self.label = ctk.CTkLabel(self, text="AI Analiz Ediyor...", font=ctk.CTkFont(size=16, weight="bold"))
+        self.label.pack(pady=10)
+        
+        self.textbox = ctk.CTkTextbox(self, width=550, height=300)
+        self.textbox.pack(pady=10)
+        
+        # Thread ile sorgu at (GUI donmasın)
+        Thread(target=self.fetch_explanation, daemon=True).start()
+        
+    def fetch_explanation(self):
+        response = ApiClient.ask_ai(
+            message="Bu log satırını analiz et. Saldırı mı, ne tür bir aktivite? Risk seviyesi nedir? Türkçe açıkla.",
+            context=self.log_text
+        )
+        
+        self.textbox.insert("1.0", response)
+        self.label.configure(text="Analiz Sonucu")
 
 
 if __name__ == "__main__":
-    main()
+    app = AdminPanel()
+    app.mainloop()

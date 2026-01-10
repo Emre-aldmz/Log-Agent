@@ -1,9 +1,19 @@
 # Bu dosya, projenin çalışması için gerekli Python kütüphanelerini listeler.
 # Kurulum için: pip install -r requirements.txt
-# yüklemeyi unutma! (dont forget installl)
 
+# GUI (Desktop Application)
 customtkinter
 pandas
 matplotlib
+tkintermapview
+fpdf
 
-gemini1
+# Backend API
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+python-dotenv
+
+# Optional: Requests for API calls
+requests

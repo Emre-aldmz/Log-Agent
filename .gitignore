@@ -1,18 +1,22 @@
-# Python cache
-__pycache__/
-*.py[cod]
-*.pyo
-
-# Ortam dosyaları
+# Environment Variables (Secrets)
 .env
+.env.local
 
-# Log ve rapor dosyaları (runtime)
+# Logs and Data
 access.log
+*.log
+threat_data.jsonl
+*.jsonl
+
+# Reports
 tehdit_raporu.txt
 durum_raporu.txt
 analiz_raporu.txt
 
-# Editor / OS
-*.swp
-*.swo
-.DS_Store
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE settings
+.vscode/
+.idea/

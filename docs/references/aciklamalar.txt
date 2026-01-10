@@ -1,0 +1,2 @@
+“Ajan, reaktif olaylarda kural tabanlı saldırı tespiti yapsa da belirsiz durumlarda Agentic yaklaşım ile dış uzman model (GPT-4.1) ile iletişime geçmeye çalışır. API yanıt vermediğinde sistem tamamen pasif kalmaz, yalnızca karar düzeyini attack → suspicious seviyesine indirerek raporlar. Bu yaklaşım, literatürde ‘graceful degradation’ olarak tanımlanmaktadır.”
+

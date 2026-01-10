@@ -1,0 +1,56 @@
+# Log Gözcüsü - DVWA Test Ortamı
+# ================================
+# Damn Vulnerable Web App (DVWA) test ortamı
+# Log dosyalarını dışarı mount ederek Log Gözcüsü ile izlenebilir hale gelir
+
+services:
+  dvwa:
+    image: vulnerables/web-dvwa
+    container_name: dvwa_test
+    ports:
+      - "8080:80"
+    volumes:
+      # Apache loglarını dışarı çıkar (Log Gözcüsü bunları okuyacak)
+      - ./logs:/var/log/apache2
+    environment:
+      - RECAPTCHA_PRIV_KEY=
+      - RECAPTCHA_PUB_KEY=
+      - SECURITY_LEVEL=low
+      - PHPIDS_ENABLED=0
+    restart: unless-stopped
+    networks:
+      - dvwa_net
+
+networks:
+  dvwa_net:
+    driver: bridge
+
+# ================================
+# KULLANIM
+# ================================
+# 1. Docker ve docker-compose yüklü olmalı:
+#    sudo pacman -S docker docker-compose  # Arch/CachyOS
+#    sudo systemctl start docker
+#
+# 2. Servisleri başlat:
+#    docker-compose up -d
+#
+# 3. DVWA'ya eriş:
+#    http://localhost:8080
+#    Kullanıcı: admin
+#    Şifre: password
+#
+# 4. İlk girişte veritabanını oluştur:
+#    Create / Reset Database butonuna tıkla
+#
+# 5. Log dosyasını kontrol et:
+#    tail -f logs/access.log
+#
+# 6. Log Gözcüsü'nü DVWA loglarını izleyecek şekilde başlat:
+#    LOG_PATH=./logs/access.log python daemon.py
+#
+# 7. Saldırı testleri yap:
+#    bash test_scenarios.sh
+#
+# 8. Bitince kapat:
+#    docker-compose down
