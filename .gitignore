@@ -20,3 +20,11 @@ __pycache__/
 # IDE settings
 .vscode/
 .idea/
+
+# Private folders
+archive/
+docs/
+
+# Test scripts
+test_scenarios.sh
+simulate_mixed_traffic.sh
