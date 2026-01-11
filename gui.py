@@ -271,7 +271,7 @@ class StatusTab(ctk.CTkFrame):
 
     def start_daemon(self):
         try:
-            subprocess.Popen([".venv/bin/python", "daemon.py"], start_new_session=True)
+            subprocess.Popen(["python", "daemon.py"], start_new_session=True)
             self.log("Daemon başlatma komutu verildi...")
             time.sleep(1)
         except Exception as e:
@@ -332,6 +332,9 @@ class LogsTab(ctk.CTkFrame):
     def refresh(self):
         if not self.winfo_exists(): return
         
+        # Mevcut scroll pozisyonunu kaydet
+        current_pos = self.textbox.yview()
+        
         # Sadece System Logs çek
         system_logs = ApiClient.get_system_logs(limit=100)
         
@@ -348,15 +351,39 @@ class LogsTab(ctk.CTkFrame):
         if not system_logs:
             self.textbox.insert("end", "-- Sistem kaydı bulunamadı --\n")
         else:
+            # En başta ayırıcı
+            self.textbox.insert("end", "=" * 100 + "\n")
+            
+            # Başlangıç logları (SYS, DAEMON, DEFENSE) ve tehdit logları (AI, TEHDIT, ANOMALI) ayır
+            startup_levels = {'SYS', 'DAEMON', 'DEFENSE'}
+            threat_levels = {'AI', 'TEHDIT', 'ANOMALI', 'UYARI'}
+            
+            in_startup_section = True
+            
             for entry in system_logs:
                 line = entry.get("content", "")
                 ts = entry.get("timestamp", "").split("T")[-1][:8] if entry.get("timestamp") else ""
                 level = entry.get('level', 'INFO').upper()
                 
+                # Startup bölümünden tehdit bölümüne geçiş
+                if in_startup_section and level in threat_levels:
+                    self.textbox.insert("end", "=" * 100 + "\n")
+                    in_startup_section = False
+                
                 self.textbox.insert("end", f"[{ts}] [{level}] {line}\n")
-                self.textbox.insert("end", "-" * 100 + "\n") # Ayırıcı Çizgi
+                
+                # Her tehdit logundan sonra ayırıcı
+                if level in threat_levels:
+                    self.textbox.insert("end", "=" * 100 + "\n")
+            
+            # Eğer hiç tehdit logu yoksa en sona ayırıcı ekle
+            if in_startup_section:
+                self.textbox.insert("end", "=" * 100 + "\n")
         
         self.textbox.configure(state="disabled")
+        
+        # Scroll pozisyonunu geri yükle
+        self.textbox.yview_moveto(current_pos[0])
 
     def show_context_menu(self, event):
         try:
@@ -529,7 +556,7 @@ class SettingsTab(ctk.CTkFrame):
         
         ctk.CTkLabel(ai_frame, text="Yapay Zeka (AI) Ayarları", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=10)
         
-        self.entry_ai_key = self._create_input(ai_frame, "OpenRouter API Key:", os.getenv("OPENROUTER_API_KEY", ""))
+        ctk.CTkLabel(ai_frame, text="✅ Yerel DistilBERT modeli kullanılıyor (ai_model/log_classifier.pth)", text_color="green").pack(anchor="w", padx=10, pady=5)
 
         # --- Email Settings ---
         email_frame = ctk.CTkFrame(self)
@@ -563,8 +590,7 @@ class SettingsTab(ctk.CTkFrame):
 
     def save_settings(self):
         try:
-            # AI
-            set_key(ENV_FILE, "OPENROUTER_API_KEY", self.entry_ai_key.get())
+            # Email
             
             # Email
             set_key(ENV_FILE, "SMTP_SERVER", self.entry_smtp_server.get())

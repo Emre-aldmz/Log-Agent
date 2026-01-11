@@ -17,3 +17,7 @@ python-dotenv
 
 # Optional: Requests for API calls
 requests
+
+# AI Model (Local Inference)
+torch>=2.0.0
+transformers>=4.30.0

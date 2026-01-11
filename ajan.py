@@ -9,98 +9,50 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-import urllib.request
-import urllib.error
-
 # ==========================
-# AI entegrasyonu (OpenRouter)
-#   - Standart kütüphanelerle (urllib)
-#   - OpenAI-style /chat/completions
+# YEREL AI MODELİ
+# Eğitilmiş DistilBERT modeli kullanılıyor
 # ==========================
 
-OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai")
-OPENROUTER_CHAT_PATH = "/api/v1/chat/completions"
+# Yerel model için gerekli importlar
+LOCAL_AI_AVAILABLE = False
+local_analyzer = None
+
+try:
+    from ai_model.inference import get_analyzer, analyze_with_local_model
+    LOCAL_AI_AVAILABLE = True
+    print("[INFO] Yerel AI modeli yükleniyor...")
+except ImportError as e:
+    print(f"[UYARI] Yerel AI modeli yüklenemedi: {e}")
+    print("[UYARI] torch ve transformers kurulu olmalı: pip install torch transformers")
 
 
 def create_ai_client() -> Optional[dict]:
     """
-    OpenRouter için minimal client objesi döner.
-    Env öncelik sırası:
-      1. LOG_GOZCUSU_GUI_API_KEY (GUI'den gelen)
-      2. OPENROUTER_API_KEY      (.env veya sistemden gelen)
+    Yerel AI modeli için client objesi döner.
     """
-    # Öncelik 1: GUI'den gelen anahtar
-    api_key = os.environ.get("LOG_GOZCUSU_GUI_API_KEY")
-    source = "GUI"
-
-    # Öncelik 2: Ortam değişkeninden (örn. .env dosyasından) gelen anahtar
-    if not api_key:
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        source = "Environment"
-
-    if not api_key:
-        print("[UYARI] API anahtarı bulunamadı. AI analizi devre dışı.")
+    global local_analyzer
+    
+    if not LOCAL_AI_AVAILABLE:
+        print("[UYARI] Yerel AI modeli kullanılamıyor. AI analizi devre dışı.")
         return None
     
-    print(f"[INFO] API anahtarı '{source}' kaynağından yüklendi.")
-
-    model = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
-    base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai").rstrip("/")
-
-    return {
-        "api_key": api_key,
-        "model": model,
-        "base_url": base_url,
-    }
-
-
-def _xai_post_json(client: dict, path: str, payload: dict, timeout: int = 30) -> Optional[dict]:
-    """
-    OpenRouter endpointine POST atar, JSON döner.
-    """
-    url = f"{client['base_url']}{path}"
-    data = json.dumps(payload).encode("utf-8")
-
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        # Cloudflare / anti-bot için gerçekçi bir UA
-        "User-Agent": os.environ.get(
-            "LOG_GOZCUSU_UA",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Authorization": f"Bearer {client['api_key']}",
-    }
-
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            return json.loads(body)
-
-    except urllib.error.HTTPError as e:
-        raw = ""
-        try:
-            raw = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            pass
-        print(f"[UYARI] AI analizi HTTP hatası: {e.code} - {raw[:300]}")
-        return None
-
+        local_analyzer = get_analyzer()
+        if local_analyzer.is_ready:
+            print("[INFO] ✅ Yerel AI modeli hazır!")
+            return {"type": "local", "analyzer": local_analyzer}
+        else:
+            print("[UYARI] Model yüklenemedi. Eğitilmiş model dosyası gerekli.")
+            return None
     except Exception as e:
-        print(f"[UYARI] AI analizi yapılamadı: {e}")
+        print(f"[HATA] AI modeli başlatılamadı: {e}")
         return None
 
 
-def _http_post_json(url: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
-    return json.loads(raw)
-
+# ==========================
+# YARDIMCI FONKSİYONLAR
+# ==========================
 
 def _clean_code_fences(text: str) -> str:
     t = (text or "").strip()
@@ -146,164 +98,89 @@ def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
 
 def analyze_with_ai(client: Any, log_line: str) -> Optional[Dict[str, Any]]:
     """
-    Her log satırı için AI'dan {label, probable_category, reason} döndürmeye çalışır.
+    Her log satırı için yerel AI modelinden {label, probable_category, reason} döndürür.
     """
     if not client:
         return None
 
-    prompt = (
-        "You are a cyber security analyst AI.\n"
-        "Input is ONE HTTP access log line.\n"
-        "Decide if it is an attack attempt or benign traffic.\n"
-        "Return ONLY valid JSON with:\n"
-        '  - label: \"attack\" or \"benign\"\n'
-        '  - probable_category: \"SQLi\" | \"XSS\" | \"Path Traversal\" | \"Command Injection\" | '
-        '\"Bruteforce\" | \"Other\" | \"None\"\n'
-        "  - reason: short 1-2 sentence explanation\n"
-        "No markdown. No code fences.\n\n"
-        f"Log line:\n{log_line}\n"
-    )
-
-    payload = {
-        "model": client["model"],
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": 100,   # kredi/tokens için sınır (Tekrar Düşürüldü)
-    }
-
-    resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=45)
-    if not resp:
-        return None
-
-    try:
-        content = resp["choices"][0]["message"]["content"]
-    except Exception:
-        return None
-
-    result = _try_parse_json(content)
-    if not isinstance(result, dict):
-        print(f"[UYARI] AI cevabı JSON değil. Ham (kısaltılmış): {str(content)[:200]}")
-        return None
-
-    # normalize
-    result.setdefault("label", "benign")
-    result.setdefault("probable_category", "Other")
-    result.setdefault("reason", "No reason returned.")
-    return result
+    # Yerel model kullan
+    if client.get("type") == "local":
+        try:
+            analyzer = client.get("analyzer")
+            if analyzer and analyzer.is_ready:
+                result = analyzer.analyze(log_line)
+                return result
+            else:
+                return None
+        except Exception as e:
+            print(f"[UYARI] Yerel AI analizi başarısız: {e}")
+            return None
+    
+    # Fallback (olmaması gereken durum)
+    return None
 
 
 def ai_parse_log_structure(client: Any, log_line: str) -> Optional[Dict[str, Any]]:
     """
-    Serbest formatlı log satırından şu alanları çekmeye çalışır:
-    - ip
-    - method
-    - path
-    - query (yoksa boş string)
-    - status (string) veya null
-    - ua veya null
+    Serbest formatlı log satırından alanları çıkarır.
     """
-    if not client:
-        return None
-
-    prompt = (
-        "You are a log parsing assistant.\n"
-        "Extract fields if possible from ONE raw HTTP access log line.\n"
-        "Fields:\n"
-        "- ip\n"
-        "- method\n"
-        "- path\n"
-        "- query (empty string if none)\n"
-        "- status (string) or null\n"
-        "- ua or null\n"
-        "If a field is unknown, use null (query uses empty string).\n"
-        "Return ONLY one valid JSON object. No markdown, no code fences.\n\n"
-        f"Log line:\n{log_line}\n"
+    # Apache Combined Log Format regex
+    apache_regex = re.compile(
+        r'(?P<ip>\S+) '
+        r'\S+ \S+ '
+        r'\[(?P<time>[^\]]+)\] '
+        r'"(?P<method>\S+) '
+        r'(?P<path>[^\s"]*)'
+        r'(?:\?(?P<query>[^\s"]*))?\s*'
+        r'(?:HTTP/[\d.]+)?" '
+        r'(?P<status>\d{3}) '
+        r'(?P<size>\S+)'
+        r'(?: "(?P<referer>[^"]*)")?'
+        r'(?: "(?P<ua>[^"]*)")?'
     )
-
-    payload = {
-        "model": client["model"],
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.0,
-        "max_tokens": 100,
+    
+    match = apache_regex.match(log_line)
+    if match:
+        return {
+            "ip": match.group("ip"),
+            "method": match.group("method"),
+            "path": match.group("path"),
+            "resource": match.group("path"),
+            "query": match.group("query") or "",
+            "status": match.group("status"),
+            "ua": match.group("ua"),
+        }
+    
+    # Basit fallback - en azından IP bulmaya çalış
+    ip_match = re.search(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', log_line)
+    method_match = re.search(r'\b(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH)\b', log_line)
+    
+    return {
+        "ip": ip_match.group(1) if ip_match else None,
+        "method": method_match.group(1) if method_match else None,
+        "path": None,
+        "resource": None,
+        "query": "",
+        "status": None,
+        "ua": None,
     }
-
-    resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=30)
-    if not resp:
-        return None
-
-    try:
-        content = resp["choices"][0]["message"]["content"].strip()
-    except Exception:
-        return None
-
-    obj = _try_parse_json(content)
-    if not isinstance(obj, dict):
-        print(f"[UYARI] AI parse cevabı JSON değil. Ham: {content[:200]}")
-        return None
-
-    # Normalizasyon
-    ip = obj.get("ip")
-    method = obj.get("method")
-    path = obj.get("path") or obj.get("resource")
-    query = obj.get("query")
-    status = obj.get("status")
-    ua = obj.get("ua") or obj.get("user_agent")
-
-    if query is None:
-        query = ""
-
-    parsed = {
-        "ip": ip,
-        "method": method,
-        "path": path,
-        "resource": path,
-        "query": query,
-        "status": status,
-        "ua": ua,
-    }
-    return parsed
 
 
 def generate_regex_from_ai(client: Any, log_line: str, category: str) -> Optional[str]:
     """
-    Saldırıyı tespit eden AI'dan, bu saldırıyı yakalayacak bir REGEX üretmesini ister.
+    Saldırı kategorisine göre basit regex paterni döndürür.
     """
-    if not client:
-        return None
-
-    prompt = (
-        "You are a regex expert for cyber security.\n"
-        f"I have a log line detected as an attack (Category: {category}).\n"
-        "Input Log Line:\n"
-        f"{log_line}\n\n"
-        "Task: Create a SAFE Python regex pattern to detect this specific attack payload.\n"
-        "Rules:\n"
-        "1. The regex must match the malicious part (payload).\n"
-        "2. Do NOT match normal traffic (avoid false positives).\n"
-        "3. Do NOT use complex lookbehinds if possible.\n"
-        "4. Return ONLY the regex string in JSON format: {\"pattern\": \"...\"}\n"
-    )
-
-    payload = {
-        "model": client["model"],
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
-        "max_tokens": 80,
+    # Kategoriye göre basit regex paternleri
+    category_patterns = {
+        "SQLi": r"(?i)(union\s+select|or\s+1\s*=\s*1|'\s*or\s*'|drop\s+table|--\s*$|;\s*delete\s+from)",
+        "XSS": r"(?i)(<script|javascript:|onerror\s*=|onload\s*=|<img\s+src\s*=|alert\s*\()",
+        "Path Traversal": r"(?:\.\./|\.\.\\|%2e%2e|%252e)",
+        "Command Injection": r"(?i)(;\s*cat\s|;\s*ls\s|`|\$\(|&&\s*whoami|;\s*id\b)",
+        "Bruteforce": r"(?i)(password|passwd|login|admin)",
+        "Other": r"(?i)(eval\s*\(|system\s*\(|exec\s*\()",
     }
-
-    resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=30)
-    if not resp:
-        return None
-
-    try:
-        content = resp["choices"][0]["message"]["content"]
-        obj = _extract_json_object(content)
-        if obj and "pattern" in obj:
-            return obj["pattern"]
-    except Exception as e:
-        print(f"[UYARI] Regex üretimi başarısız: {e}")
     
-    return None
+    return category_patterns.get(category, None)
 
 
 # ==========================
@@ -357,46 +234,48 @@ def send_email_alert(subject: str, body: str):
 def ask_security_assistant(client: Any, context_data: str, user_question: str) -> str:
     """
     Kullanıcının doğal dilde sorduğu soruları, eldeki log/tehdit verisine bakarak yanıtlar.
+    Not: Yerel model log sınıflandırma için eğitilmiştir, genel sohbet için uygun değildir.
+    Bu fonksiyon verideki anahtar kelimelere dayalı basit bir yanıt üretir.
     """
     if not client:
-        return "AI İstemcisi başlatılamadı (API Anahtarı eksik)."
+        return "AI modeli yüklenemedi."
 
-    # Context verisi çok uzunsa kırp (Token limitini aşmamak için)
-    # Basit bir kırpma: son 4000 karakter
+    # Context verisi çok uzunsa kırp
     if len(context_data) > 8000:
         context_data = "...(önceki veriler kırpıldı)...\n" + context_data[-8000:]
 
-    prompt = (
-        "You are 'Log Gözcüsü Asistanı', a helpful cyber security expert AI.\n"
-        "You have access to the following threat logs/summaries:\n"
-        "--- START Data ---\n"
-        f"{context_data}\n"
-        "--- END DATA ---\n\n"
-        "User Question:\n"
-        f"{user_question}\n\n"
-        "Instructions:\n"
-        "1. Answer in Turkish (Türkçe).\n"
-        "2. Be concise and professional.\n"
-        "3. Base your answer ONLY on the provided data and general security knowledge.\n"
-        "4. If the answer is not in the data, say so.\n"
-    )
-
-    payload = {
-        "model": client["model"],
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3,
-        "max_tokens": 150,
-    }
-
-    resp = _xai_post_json(client, OPENROUTER_CHAT_PATH, payload, timeout=60)
-    if not resp:
-        return "AI servisine erişilemedi veya zaman aşımı oluştu."
-
-    try:
-        content = resp["choices"][0]["message"]["content"]
-        return content
-    except Exception as e:
-        return f"Cevap işlenirken hata oluştu: {e}"
+    # Basit anahtar kelime analizi
+    question_lower = user_question.lower()
+    
+    # Temel istatistikleri hesapla
+    lines = context_data.strip().split('\n')
+    total_threats = len([l for l in lines if 'attack' in l.lower() or 'threat' in l.lower() or 'tespit' in l.lower()])
+    sqli_count = context_data.lower().count('sqli') + context_data.lower().count('sql injection')
+    xss_count = context_data.lower().count('xss') + context_data.lower().count('cross-site')
+    
+    # Soruya göre yanıt üret
+    if any(word in question_lower for word in ['kaç', 'sayı', 'adet', 'toplam']):
+        return f"Verilerde yaklaşık {total_threats} adet tehdit/saldırı kaydı bulunmaktadır. SQLi: ~{sqli_count}, XSS: ~{xss_count}"
+    
+    elif any(word in question_lower for word in ['tehlike', 'risk', 'güvenlik', 'durum']):
+        if total_threats > 10:
+            return f"Dikkat! {total_threats} tehdit tespit edilmiş. Güvenlik durumu incelenmeli."
+        elif total_threats > 0:
+            return f"{total_threats} tehdit kaydı mevcut. Normal izleme devam ediyor."
+        else:
+            return "Mevcut verilerde aktif tehdit bulunmuyor."
+    
+    elif any(word in question_lower for word in ['ip', 'adres', 'saldırgan']):
+        # IP adreslerini bul
+        import re
+        ips = re.findall(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', context_data)
+        unique_ips = list(set(ips))[:5]  # İlk 5 benzersiz IP
+        if unique_ips:
+            return f"Verilerdeki IP adresleri: {', '.join(unique_ips)}"
+        return "Verilerde IP adresi bulunamadı."
+    
+    else:
+        return f"Elimdeki verilerde {total_threats} tehdit kaydı var. Daha spesifik sorular için 'kaç tehdit var', 'güvenlik durumu' veya 'hangi IP'ler' gibi sorular sorabilirsiniz."
 
 
 
@@ -883,9 +762,9 @@ class LogWatcherAgent:
         print(f"JSON veri dosyası     : {self.threat_data_path}")
         print(f"Kural dosyası         : {self.model.rules_path}")
         if self.ai_client is None:
-            print("AI analizi: DEVRE DIŞI (OPENROUTER_API_KEY yok)")
+            print("AI analizi: DEVRE DIŞI (Model yüklenemedi)")
         else:
-            print(f"AI analizi: AKTİF (OpenRouter, model={self.ai_client['model']})")
+            print("AI analizi: AKTİF (Yerel DistilBERT modeli)")
         print()
 
         for raw_line in self._follow_log():

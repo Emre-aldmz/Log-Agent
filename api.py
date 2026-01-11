@@ -318,7 +318,7 @@ async def get_threat_by_id(threat_id: str):
 
 
 @app.post("/api/threats/{index}/feedback")
-async def submit_feedback(index: int, feedback: str = Query(..., regex="^(true_positive|false_positive)$")):
+async def submit_feedback(index: int, feedback: str = Query(..., pattern="^(true_positive|false_positive)$")):
     """Tehdit için feedback gönder (true/false positive)."""
     
     threat_file = DATA_DIR / "threat_data.jsonl"

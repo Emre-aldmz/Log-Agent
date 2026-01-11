@@ -407,8 +407,12 @@ class LogDaemon:
         try:
             # api.py'deki app'i import et
             import api
-            # Global AI client'ı aktar
-            api.global_ai_client = self.agent.ai_client
+            # Global AI client'ı aktar (agent hazırsa)
+            if self.agent:
+                api.global_ai_client = self.agent.ai_client
+            else:
+                # Agent henüz hazır değil, client'ı sonra set edelim
+                api.global_ai_client = None
             
             from api import app
             
